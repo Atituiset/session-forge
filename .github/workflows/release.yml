@@ -99,7 +99,7 @@ jobs:
 
           function Get-InstallDir {
             $key = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\SessionForge" -ErrorAction SilentlyContinue
-            if ($key -and $key.InstallLocation) { return $key.InstallLocation }
+            if ($key -and $key.InstallLocation) { return $key.InstallLocation.Trim('"').TrimEnd('\') }
             foreach ($p in @("$env:LOCALAPPDATA\SessionForge", "$env:LOCALAPPDATA\Programs\SessionForge")) {
               if (Test-Path "$p\SessionForge.exe") { return $p }
             }
@@ -138,7 +138,7 @@ jobs:
           Write-Host "relaunch healthy"
 
           Write-Host "== uninstall (validates PREUNINSTALL taskkill hook) =="
-          Start-Process "$dir\unins000.exe" -ArgumentList "/SILENT" -Wait
+          Start-Process "$dir\unins000.exe" -ArgumentList "/S" -Wait
           Start-Sleep 5
           if (Get-Process "session-forge-engine","SessionForge" -ErrorAction SilentlyContinue) {
             Get-Process "session-forge-engine","SessionForge" -ErrorAction SilentlyContinue | Stop-Process -Force
