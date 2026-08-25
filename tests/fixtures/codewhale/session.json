@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "metadata": { "cwd": "/home/u/webapp", "model": "glm-4.7" },
+  "messages": [
+    { "role": "user", "content": [{ "type": "text", "text": "分析下这个项目" }] },
+    {
+      "role": "assistant",
+      "content": [{ "type": "text", "text": "这是一个 React 项目。" }],
+      "tool_calls": [
+        {
+          "id": "call_a",
+          "type": "function",
+          "function": { "name": "read_file", "arguments": "{\"path\":\"package.json\"}" }
+        }
+      ]
+    }
+  ]
+}

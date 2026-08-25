@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run lint && bun run typecheck && bun test
+      - run: bash scripts/build-all.sh
+      - name: package
+        run: |
+          cd dist
+          for f in session-forge-linux-* session-forge-macos-*; do
+            tar czf "$f.tar.gz" "$f"
+            rm "$f"
+          done
+          sha256sum * > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*
+          generate_release_notes: true
