@@ -5,10 +5,11 @@ use tauri::{
 };
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
+use std::sync::Mutex;
 
 const ENGINE_PORT: u16 = 4177;
 
-struct EngineHandle(CommandChild);
+struct EngineHandle(Mutex<Option<CommandChild>>);
 
 pub fn run() {
     tauri::Builder::default()
@@ -24,8 +25,21 @@ pub fn run() {
                 let _ = window.hide();
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running SessionForge");
+        .build(tauri::generate_context!())
+        .expect("error while building SessionForge")
+        .run(|app, event| match event {
+            tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => kill_engine(app),
+            _ => {}
+        });
+}
+
+fn kill_engine(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<EngineHandle>() {
+        if let Some(child) = state.0.lock().unwrap().take() {
+            let _ = child.kill();
+            eprintln!("engine sidecar terminated");
+        }
+    }
 }
 
 fn spawn_engine(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -34,7 +48,7 @@ fn spawn_engine(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>
         .sidecar("session-forge-engine")?
         .args(["serve", "--port", &ENGINE_PORT.to_string(), "--headless"]);
     let (mut rx, child) = sidecar.spawn()?;
-    app.manage(EngineHandle(child));
+    app.manage(EngineHandle(Mutex::new(Some(child))));
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             if let CommandEvent::Error(err) = event {
