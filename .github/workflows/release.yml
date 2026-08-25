@@ -89,7 +89,7 @@ jobs:
           releaseBody: "AI 编码 Session 聚合与互操作平台。桌面版内置引擎，数据全部本地处理。"
           releaseDraft: false
           prerelease: false
-          args: ${{ runner.os == 'Linux' && '--bundles deb appimage' || '' }}
+          args: ${{ runner.os == 'Linux' && '--bundles deb' || '' }}
 
   cli:
     needs: sidecar
