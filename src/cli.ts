@@ -1,3 +1,5 @@
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { Command } from "commander";
 import {
   aggregateByProject,
@@ -271,7 +273,11 @@ program
     const store = new Store(opts.db);
     const transport = new LocalTransport();
     let scanning = false;
-    let lastScan: import("./discovery.ts").DiscoveryReport | null = null;
+    let scanStartedAt = 0;
+    const remoteJobs = new Map<
+      string,
+      { status: string; startedAt: number; summary?: unknown; error?: string }
+    >();
 
     const server = Bun.serve({
       port: Number.parseInt(opts.port, 10),
@@ -283,13 +289,80 @@ program
         if (url.pathname === "/api/scan" && req.method === "POST") {
           if (scanning) return Response.json({ status: "busy" }, { status: 409 });
           scanning = true;
+          scanStartedAt = Date.now();
           try {
-            lastScan = await discoverAndIngest(transport, store);
-            return Response.json({ status: "ok", summary: lastScan });
+            const summary = await discoverAndIngest(transport, store);
+            return Response.json({ status: "ok", summary });
           } catch (err) {
             return Response.json({ status: "error", error: String(err) }, { status: 500 });
           } finally {
             scanning = false;
+          }
+        }
+        if (url.pathname === "/api/scan/status") {
+          return Response.json({ scanning, elapsedMs: scanning ? Date.now() - scanStartedAt : 0 });
+        }
+        if (url.pathname === "/api/remotes") {
+          if (req.method === "GET") {
+            return Response.json({
+              remotes: loadRemotes().map((r) => ({
+                ...r,
+                job: remoteJobs.get(r.name) ?? null,
+              })),
+            });
+          }
+          if (req.method === "POST") {
+            const body = (await req.json()) as { name?: string };
+            const name = body.name?.trim();
+            if (!name || !/^[A-Za-z0-9_.@-]+$/.test(name)) {
+              return Response.json(
+                { error: "invalid host (allowed: letters digits _ . @ -)" },
+                { status: 400 },
+              );
+            }
+            const remotes = loadRemotes();
+            if (!remotes.some((r) => r.name === name)) {
+              remotes.push({ name, addedAt: Date.now() });
+              saveRemotes(remotes);
+            }
+            return Response.json({ ok: true });
+          }
+        }
+        const remoteMatch = url.pathname.match(/^\/api\/remotes\/([^/]+?)(\/scan)?$/);
+        if (remoteMatch) {
+          const name = decodeURIComponent(remoteMatch[1] ?? "");
+          if (req.method === "DELETE") {
+            saveRemotes(loadRemotes().filter((r) => r.name !== name));
+            remoteJobs.delete(name);
+            return Response.json({ ok: true });
+          }
+          if (url.pathname.endsWith("/scan") && req.method === "POST") {
+            if (!loadRemotes().some((r) => r.name === name)) {
+              return Response.json({ error: "unknown remote" }, { status: 404 });
+            }
+            const job = remoteJobs.get(name);
+            if (job?.status === "running") {
+              return Response.json({ status: "busy" }, { status: 409 });
+            }
+            remoteJobs.set(name, { status: "running", startedAt: Date.now() });
+            void (async () => {
+              try {
+                const sshTransport = new SshTransport(name);
+                const summary = await discoverAndIngest(sshTransport, store);
+                remoteJobs.set(name, {
+                  status: "ok",
+                  startedAt: Date.now(),
+                  summary: summary.tools.length,
+                });
+              } catch (err) {
+                remoteJobs.set(name, {
+                  status: "error",
+                  startedAt: Date.now(),
+                  error: String(err).slice(0, 300),
+                });
+              }
+            })();
+            return Response.json({ ok: true });
           }
         }
         if (url.pathname === "/api/health") {
@@ -303,6 +376,23 @@ program
     }
     setInterval(() => {}, 60_000);
   });
+
+function remotesPath(): string {
+  return path.join(path.dirname(defaultStorePath()), "remotes.json");
+}
+
+function loadRemotes(): { name: string; addedAt: number }[] {
+  try {
+    return JSON.parse(readFileSync(remotesPath(), "utf8")) as { name: string; addedAt: number }[];
+  } catch {
+    return [];
+  }
+}
+
+function saveRemotes(remotes: { name: string; addedAt: number }[]): void {
+  mkdirSync(path.dirname(remotesPath()), { recursive: true });
+  writeFileSync(remotesPath(), JSON.stringify(remotes, null, 2));
+}
 
 function buildDashboardData(store: Store): Record<string, unknown> {
   const rows = store.allSessions();
