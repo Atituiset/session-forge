@@ -122,7 +122,12 @@ jobs:
           Write-Host "installed to: $dir"
 
           Write-Host "== launch app, expect engine sidecar on :4177 =="
-          Start-Process "$dir\SessionForge.exe"
+          Write-Host (Get-ChildItem $dir | Select-Object -ExpandProperty Name | Out-String)
+          $main = Get-ChildItem $dir -Filter "*.exe" |
+            Where-Object { $_.Name -notlike "unins*" -and $_.Name -notlike "*engine*" } |
+            Select-Object -First 1
+          if (-not $main) { throw "no main executable found in $dir" }
+          Start-Process $main.FullName
           Wait-Healthy
           if (-not (Get-Process "session-forge-engine" -ErrorAction SilentlyContinue)) { throw "engine process not running" }
           Write-Host "engine healthy, sidecar process confirmed"
@@ -133,18 +138,20 @@ jobs:
           Write-Host "overwrite install succeeded while app was running"
 
           Write-Host "== relaunch fresh build =="
-          Start-Process "$dir\SessionForge.exe"
+          Start-Process $main.FullName
           Wait-Healthy
           Write-Host "relaunch healthy"
 
           Write-Host "== uninstall (validates PREUNINSTALL taskkill hook) =="
-          Start-Process "$dir\unins000.exe" -ArgumentList "/S" -Wait
+          $unins = Get-ChildItem $dir -Filter "unins*.exe" | Select-Object -First 1
+          Start-Process $unins.FullName -ArgumentList "/S" -Wait
           Start-Sleep 5
           if (Get-Process "session-forge-engine","SessionForge" -ErrorAction SilentlyContinue) {
             Get-Process "session-forge-engine","SessionForge" -ErrorAction SilentlyContinue | Stop-Process -Force
             throw "processes survived uninstall"
           }
           if (Test-Path "$dir\SessionForge.exe") { throw "binary survived uninstall" }
+          if (Get-ChildItem $dir -Filter "*.exe" -ErrorAction SilentlyContinue | Where-Object Name -notlike "unins*") { throw "main binary survived uninstall" }
           Write-Host "windows smoke PASSED"
 
   cli:
