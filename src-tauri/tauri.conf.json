@@ -29,7 +29,7 @@
     "active": true,
     "targets": ["nsis", "dmg", "deb", "appimage"],
     "icon": ["icons/icon.ico", "icons/icon.png"],
-    "externalBin": ["sidecar/session-forge-engine"],
+    "externalBin": ["binaries/session-forge-engine"],
     "windows": {
       "nsis": {
         "installMode": "currentUser",
