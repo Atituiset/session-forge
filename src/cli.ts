@@ -279,96 +279,107 @@ program
       { status: string; startedAt: number; summary?: unknown; error?: string }
     >();
 
+    const handleApi = async (req: Request): Promise<Response> => {
+      const url = new URL(req.url);
+      if (url.pathname === "/api/data") {
+        return Response.json(buildDashboardData(store));
+      }
+      if (url.pathname === "/api/scan" && req.method === "POST") {
+        if (scanning) return Response.json({ status: "busy" }, { status: 409 });
+        scanning = true;
+        scanStartedAt = Date.now();
+        try {
+          const summary = await discoverAndIngest(transport, store);
+          return Response.json({ status: "ok", summary });
+        } catch (err) {
+          return Response.json({ status: "error", error: String(err) }, { status: 500 });
+        } finally {
+          scanning = false;
+        }
+      }
+      if (url.pathname === "/api/scan/status") {
+        return Response.json({ scanning, elapsedMs: scanning ? Date.now() - scanStartedAt : 0 });
+      }
+      if (url.pathname === "/api/remotes") {
+        if (req.method === "GET") {
+          return Response.json({
+            remotes: loadRemotes().map((r) => ({
+              ...r,
+              job: remoteJobs.get(r.name) ?? null,
+            })),
+          });
+        }
+        if (req.method === "POST") {
+          const body = (await req.json()) as { name?: string };
+          const name = body.name?.trim();
+          if (!name || !/^[A-Za-z0-9_.@-]+$/.test(name)) {
+            return Response.json(
+              { error: "invalid host (allowed: letters digits _ . @ -)" },
+              { status: 400 },
+            );
+          }
+          const remotes = loadRemotes();
+          if (!remotes.some((r) => r.name === name)) {
+            remotes.push({ name, addedAt: Date.now() });
+            saveRemotes(remotes);
+          }
+          return Response.json({ ok: true });
+        }
+      }
+      const remoteMatch = url.pathname.match(/^\/api\/remotes\/([^/]+?)(\/scan)?$/);
+      if (remoteMatch) {
+        const name = decodeURIComponent(remoteMatch[1] ?? "");
+        if (req.method === "DELETE") {
+          saveRemotes(loadRemotes().filter((r) => r.name !== name));
+          remoteJobs.delete(name);
+          return Response.json({ ok: true });
+        }
+        if (url.pathname.endsWith("/scan") && req.method === "POST") {
+          if (!loadRemotes().some((r) => r.name === name)) {
+            return Response.json({ error: "unknown remote" }, { status: 404 });
+          }
+          const job = remoteJobs.get(name);
+          if (job?.status === "running") {
+            return Response.json({ status: "busy" }, { status: 409 });
+          }
+          remoteJobs.set(name, { status: "running", startedAt: Date.now() });
+          void (async () => {
+            try {
+              const sshTransport = new SshTransport(name);
+              const summary = await discoverAndIngest(sshTransport, store);
+              remoteJobs.set(name, {
+                status: "ok",
+                startedAt: Date.now(),
+                summary: summary.tools.length,
+              });
+            } catch (err) {
+              remoteJobs.set(name, {
+                status: "error",
+                startedAt: Date.now(),
+                error: String(err).slice(0, 300),
+              });
+            }
+          })();
+          return Response.json({ ok: true });
+        }
+      }
+      if (url.pathname === "/api/health") {
+        return Response.json({ ok: true, scanning });
+      }
+      return new Response("not found", { status: 404 });
+    };
+
     const server = Bun.serve({
       port: Number.parseInt(opts.port, 10),
       async fetch(req) {
-        const url = new URL(req.url);
-        if (url.pathname === "/api/data") {
-          return Response.json(buildDashboardData(store));
+        if (req.method === "OPTIONS") {
+          return new Response(null, { status: 204, headers: corsHeaders() });
         }
-        if (url.pathname === "/api/scan" && req.method === "POST") {
-          if (scanning) return Response.json({ status: "busy" }, { status: 409 });
-          scanning = true;
-          scanStartedAt = Date.now();
-          try {
-            const summary = await discoverAndIngest(transport, store);
-            return Response.json({ status: "ok", summary });
-          } catch (err) {
-            return Response.json({ status: "error", error: String(err) }, { status: 500 });
-          } finally {
-            scanning = false;
-          }
+        const res = await handleApi(req);
+        for (const [k, v] of Object.entries(corsHeaders())) {
+          res.headers.set(k, v);
         }
-        if (url.pathname === "/api/scan/status") {
-          return Response.json({ scanning, elapsedMs: scanning ? Date.now() - scanStartedAt : 0 });
-        }
-        if (url.pathname === "/api/remotes") {
-          if (req.method === "GET") {
-            return Response.json({
-              remotes: loadRemotes().map((r) => ({
-                ...r,
-                job: remoteJobs.get(r.name) ?? null,
-              })),
-            });
-          }
-          if (req.method === "POST") {
-            const body = (await req.json()) as { name?: string };
-            const name = body.name?.trim();
-            if (!name || !/^[A-Za-z0-9_.@-]+$/.test(name)) {
-              return Response.json(
-                { error: "invalid host (allowed: letters digits _ . @ -)" },
-                { status: 400 },
-              );
-            }
-            const remotes = loadRemotes();
-            if (!remotes.some((r) => r.name === name)) {
-              remotes.push({ name, addedAt: Date.now() });
-              saveRemotes(remotes);
-            }
-            return Response.json({ ok: true });
-          }
-        }
-        const remoteMatch = url.pathname.match(/^\/api\/remotes\/([^/]+?)(\/scan)?$/);
-        if (remoteMatch) {
-          const name = decodeURIComponent(remoteMatch[1] ?? "");
-          if (req.method === "DELETE") {
-            saveRemotes(loadRemotes().filter((r) => r.name !== name));
-            remoteJobs.delete(name);
-            return Response.json({ ok: true });
-          }
-          if (url.pathname.endsWith("/scan") && req.method === "POST") {
-            if (!loadRemotes().some((r) => r.name === name)) {
-              return Response.json({ error: "unknown remote" }, { status: 404 });
-            }
-            const job = remoteJobs.get(name);
-            if (job?.status === "running") {
-              return Response.json({ status: "busy" }, { status: 409 });
-            }
-            remoteJobs.set(name, { status: "running", startedAt: Date.now() });
-            void (async () => {
-              try {
-                const sshTransport = new SshTransport(name);
-                const summary = await discoverAndIngest(sshTransport, store);
-                remoteJobs.set(name, {
-                  status: "ok",
-                  startedAt: Date.now(),
-                  summary: summary.tools.length,
-                });
-              } catch (err) {
-                remoteJobs.set(name, {
-                  status: "error",
-                  startedAt: Date.now(),
-                  error: String(err).slice(0, 300),
-                });
-              }
-            })();
-            return Response.json({ ok: true });
-          }
-        }
-        if (url.pathname === "/api/health") {
-          return Response.json({ ok: true, scanning });
-        }
-        return new Response("not found", { status: 404 });
+        return res;
       },
     });
     if (!opts.headless) {
@@ -376,6 +387,14 @@ program
     }
     setInterval(() => {}, 60_000);
   });
+
+function corsHeaders(): Record<string, string> {
+  return {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+    "access-control-allow-headers": "content-type",
+  };
+}
 
 function remotesPath(): string {
   return path.join(path.dirname(defaultStorePath()), "remotes.json");

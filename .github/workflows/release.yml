@@ -90,6 +90,62 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ runner.os == 'Linux' && '--bundles deb' || '' }}
+      - name: windows smoke — install / run / overwrite / uninstall
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Get-ChildItem "src-tauri/target/release/bundle/nsis/SessionForge_*_x64-setup.exe" | Select-Object -First 1
+
+          function Get-InstallDir {
+            $key = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\SessionForge" -ErrorAction SilentlyContinue
+            if ($key -and $key.InstallLocation) { return $key.InstallLocation }
+            foreach ($p in @("$env:LOCALAPPDATA\SessionForge", "$env:LOCALAPPDATA\Programs\SessionForge")) {
+              if (Test-Path "$p\SessionForge.exe") { return $p }
+            }
+            throw "install location not found"
+          }
+          function Wait-Healthy {
+            for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep 1
+              try {
+                $h = Invoke-RestMethod "http://127.0.0.1:4177/api/health" -TimeoutSec 2
+                if ($h.ok) { return }
+              } catch {}
+            }
+            throw "engine health check failed after 30s"
+          }
+
+          Write-Host "== install #1 (silent) =="
+          Start-Process $setup.FullName -ArgumentList "/S" -Wait
+          $dir = Get-InstallDir
+          Write-Host "installed to: $dir"
+
+          Write-Host "== launch app, expect engine sidecar on :4177 =="
+          Start-Process "$dir\SessionForge.exe"
+          Wait-Healthy
+          if (-not (Get-Process "session-forge-engine" -ErrorAction SilentlyContinue)) { throw "engine process not running" }
+          Write-Host "engine healthy, sidecar process confirmed"
+
+          Write-Host "== install #2 over RUNNING app (validates taskkill hooks) =="
+          Start-Process $setup.FullName -ArgumentList "/S" -Wait
+          Start-Sleep 3
+          Write-Host "overwrite install succeeded while app was running"
+
+          Write-Host "== relaunch fresh build =="
+          Start-Process "$dir\SessionForge.exe"
+          Wait-Healthy
+          Write-Host "relaunch healthy"
+
+          Write-Host "== uninstall (validates PREUNINSTALL taskkill hook) =="
+          Start-Process "$dir\unins000.exe" -ArgumentList "/SILENT" -Wait
+          Start-Sleep 5
+          if (Get-Process "session-forge-engine","SessionForge" -ErrorAction SilentlyContinue) {
+            Get-Process "session-forge-engine","SessionForge" -ErrorAction SilentlyContinue | Stop-Process -Force
+            throw "processes survived uninstall"
+          }
+          if (Test-Path "$dir\SessionForge.exe") { throw "binary survived uninstall" }
+          Write-Host "windows smoke PASSED"
 
   cli:
     needs: sidecar
