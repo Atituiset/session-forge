@@ -12,7 +12,7 @@ export class AntigravityReader implements Reader {
     for (const file of group.files) {
       try {
         const text = await readTextVia(transport, file);
-        const session = parseTranscript(file, group.toolId, text);
+        const session = await parseTranscript(transport, file, group.toolId, text);
         if (session) yield session;
       } catch (err) {
         yield { kind: "issue", path: file, error: String(err) };
@@ -21,11 +21,12 @@ export class AntigravityReader implements Reader {
   }
 }
 
-function parseTranscript(
+async function parseTranscript(
+  transport: Transport,
   file: string,
   toolId: string,
   text: string,
-): Extract<ScanEvent, { kind: "session" }> | null {
+): Promise<Extract<ScanEvent, { kind: "session" }> | null> {
   const brainId = file.includes("/brain/")
     ? (file.split("/brain/")[1]?.split("/")[0] ?? file)
     : file;
@@ -131,8 +132,29 @@ function parseTranscript(
     projectPath: null,
     messages,
   });
-  const rev = Date.now();
+  const rev = await stableRev(transport, file);
   return { kind: "session", sourceFile: file, rev, session };
+}
+
+// Stable change-detection value: mtime for local files, wall clock only as a
+// last resort (remote stat is not uniformly available). Avoids rewriting every
+// session's raw JSON on each scan.
+export async function stableRev(transport: Transport, file: string): Promise<number> {
+  if (transport.kind === "local") {
+    try {
+      return (await Bun.file(file).lastModified) || 0;
+    } catch {
+      return 0;
+    }
+  }
+  try {
+    if (transport.exec) {
+      const r = await transport.exec(["stat", "-c", "%Y", file]);
+      const mtime = Number.parseInt(r.stdout.trim(), 10);
+      if (r.exitCode === 0 && Number.isFinite(mtime)) return mtime * 1000;
+    }
+  } catch {}
+  return 0;
 }
 
 function extractString(row: Record<string, unknown>, key: string): string {

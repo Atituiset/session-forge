@@ -79,7 +79,7 @@ function countDiff(m: NirMessage, emit: (add: number, del: number) => void): voi
     const oldStr = typeof input.old_string === "string" ? input.old_string : null;
     const newStr = typeof input.new_string === "string" ? input.new_string : null;
     if (oldStr !== null || newStr !== null) {
-      emit(countLines(newStr), countLines(oldStr));
+      emit(...trimmedLineDelta(oldStr ?? "", newStr ?? ""));
     }
     return;
   }
@@ -112,6 +112,29 @@ function countPatchHunks(patch: string, emit: (add: number, del: number) => void
 function countLines(text: string | null): number {
   if (!text || text === "") return 0;
   return text.split("\n").length;
+}
+
+// Approximate line-level delta for an edit: strip the common leading and
+// trailing lines before counting, so replacing one line inside a large block
+// no longer reports +N/-N for the whole block.
+function trimmedLineDelta(oldText: string, newText: string): [number, number] {
+  const oldLines = oldText.length > 0 ? oldText.split("\n") : [];
+  const newLines = newText.length > 0 ? newText.split("\n") : [];
+  let start = 0;
+  while (
+    start < oldLines.length &&
+    start < newLines.length &&
+    oldLines[start] === newLines[start]
+  ) {
+    start++;
+  }
+  let endOld = oldLines.length;
+  let endNew = newLines.length;
+  while (endOld > start && endNew > start && oldLines[endOld - 1] === newLines[endNew - 1]) {
+    endOld--;
+    endNew--;
+  }
+  return [endNew - start, endOld - start];
 }
 
 function collectFiles(toolName: string | null, toolInput: unknown, out: Set<string>): void {

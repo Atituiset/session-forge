@@ -5,6 +5,10 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -30,8 +34,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: ".bun-version"
       - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun test
       - name: build engine sidecars
         shell: bash
         env:
@@ -61,7 +68,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: ".bun-version"
       - run: bun install --frozen-lockfile
       - uses: actions/download-artifact@v4
         with:
@@ -127,9 +134,13 @@ jobs:
             Where-Object { $_.Name -notlike "unins*" -and $_.Name -notlike "*engine*" } |
             Select-Object -First 1
           if (-not $main) { throw "no main executable found in $dir" }
+          # Derive engine process name from the bundled engine binary, not hardcoded.
+          $engineExe = Get-ChildItem $dir -Filter "*engine*.exe" | Select-Object -First 1
+          if (-not $engineExe) { throw "no engine executable found in $dir" }
+          $engineProcName = [IO.Path]::GetFileNameWithoutExtension($engineExe.Name)
           Start-Process $main.FullName
           Wait-Healthy
-          if (-not (Get-Process "session-forge-engine" -ErrorAction SilentlyContinue)) { throw "engine process not running" }
+          if (-not (Get-Process $engineProcName -ErrorAction SilentlyContinue)) { throw "engine process not running" }
           Write-Host "engine healthy, sidecar process confirmed"
 
           Write-Host "== install #2 over RUNNING app (validates taskkill hooks) =="
@@ -146,11 +157,12 @@ jobs:
           $unins = Get-ChildItem $dir -Filter "unins*.exe" | Select-Object -First 1
           Start-Process $unins.FullName -ArgumentList "/S" -Wait
           Start-Sleep 5
-          if (Get-Process "session-forge-engine","SessionForge" -ErrorAction SilentlyContinue) {
-            Get-Process "session-forge-engine","SessionForge" -ErrorAction SilentlyContinue | Stop-Process -Force
+          $survivorNames = @($engineProcName, $main.BaseName)
+          if (Get-Process -Name $survivorNames -ErrorAction SilentlyContinue) {
+            Get-Process -Name $survivorNames -ErrorAction SilentlyContinue | Stop-Process -Force
             throw "processes survived uninstall"
           }
-          if (Test-Path "$dir\SessionForge.exe") { throw "binary survived uninstall" }
+          if (Test-Path "$dir\$($main.Name)") { throw "binary survived uninstall" }
           if (Get-ChildItem $dir -Filter "*.exe" -ErrorAction SilentlyContinue | Where-Object Name -notlike "unins*") { throw "main binary survived uninstall" }
           Write-Host "windows smoke PASSED"
 
@@ -161,7 +173,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: ".bun-version"
       - run: bun install --frozen-lockfile
       - run: bash scripts/build-all.sh
       - name: package cli binaries

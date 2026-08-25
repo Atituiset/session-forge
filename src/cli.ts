@@ -1,6 +1,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
+// Imported (not runtime-read) so the version is inlined by `bun build --compile`.
+import pkg from "../package.json";
 import {
   aggregateByProject,
   aggregateByTime,
@@ -28,7 +30,7 @@ const program = new Command();
 program
   .name("session-forge")
   .description("Aggregate AI coding agent sessions into searchable, reusable knowledge assets")
-  .version("0.1.0");
+  .version(appVersion());
 
 program
   .command("scan")
@@ -97,11 +99,17 @@ program
   .option("--db <path>", "cache database path", defaultStorePath())
   .option("--threshold <n>", "minimum user rounds", "5")
   .action(async (opts: { db: string; threshold: string }) => {
+    const threshold = Number.parseInt(opts.threshold, 10);
+    if (!Number.isFinite(threshold) || threshold < 1) {
+      console.error(`Invalid --threshold: ${opts.threshold} (expected integer >= 1).`);
+      process.exitCode = 1;
+      return;
+    }
     const store = new Store(opts.db);
     try {
-      const rows = blackholes(store.allSessions(), Number.parseInt(opts.threshold, 10));
+      const rows = blackholes(store.allSessions(), threshold);
       if (rows.length === 0) {
-        console.log(`No sessions with >= ${opts.threshold} rounds.`);
+        console.log(`No sessions with >= ${threshold} rounds.`);
         return;
       }
       console.log(
@@ -126,7 +134,7 @@ program
             ]),
         ),
       );
-      console.log(`\n${rows.length} blackhole sessions (>= ${opts.threshold} rounds)`);
+      console.log(`\n${rows.length} blackhole sessions (>= ${threshold} rounds)`);
     } finally {
       store.close();
     }
@@ -196,7 +204,7 @@ program
             tag = await llmClassify(goal, { apiKey: apiKey as string });
             llmOk++;
           } catch {
-            store.setTags(row.source, row.id, [tag]);
+            // keep the rule-engine tag on LLM failure
           }
         }
         store.setTags(row.source, row.id, [tag]);
@@ -372,11 +380,12 @@ program
     const server = Bun.serve({
       port: Number.parseInt(opts.port, 10),
       async fetch(req) {
+        const origin = req.headers.get("origin");
         if (req.method === "OPTIONS") {
-          return new Response(null, { status: 204, headers: corsHeaders() });
+          return new Response(null, { status: 204, headers: corsHeaders(origin) });
         }
         const res = await handleApi(req);
-        for (const [k, v] of Object.entries(corsHeaders())) {
+        for (const [k, v] of Object.entries(corsHeaders(origin))) {
           res.headers.set(k, v);
         }
         return res;
@@ -385,15 +394,45 @@ program
     if (!opts.headless) {
       console.log(`SessionForge engine listening on http://127.0.0.1:${server.port}`);
     }
-    setInterval(() => {}, 60_000);
+    let closed = false;
+    const shutdown = (): void => {
+      if (closed) return;
+      closed = true;
+      try {
+        store.close();
+      } catch {}
+      server.stop(true);
+      process.exit(0);
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
   });
 
-function corsHeaders(): Record<string, string> {
+function appVersion(): string {
+  return typeof pkg.version === "string" ? pkg.version : "0.0.0";
+}
+
+function corsHeaders(origin: string | null): Record<string, string> {
+  // Only the desktop webview and same-origin panel may read this API.
+  const allowed = origin !== null && originAllowed(origin);
   return {
-    "access-control-allow-origin": "*",
+    "access-control-allow-origin": allowed ? origin : "null",
+    vary: "origin",
     "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
     "access-control-allow-headers": "content-type",
   };
+}
+
+const ALLOWED_HOSTS = new Set(["tauri.localhost", "ipc.localhost", "127.0.0.1", "localhost"]);
+
+function originAllowed(origin: string): boolean {
+  try {
+    const url = new URL(origin);
+    if (url.protocol === "tauri:") return true;
+    return ALLOWED_HOSTS.has(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function remotesPath(): string {

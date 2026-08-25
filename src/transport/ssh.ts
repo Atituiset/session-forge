@@ -130,6 +130,9 @@ export function globToFind(pattern: string): { base: string; wholename: string; 
   const translated = rest
     .map((seg) => (seg === "**" ? "*" : seg.replaceAll("*", "[!/]*")))
     .join("/");
-  const maxdepth = rest.some((s) => s === "**") ? 12 : rest.length;
+  // Cap on how deep a `**` segment will recurse when translated to find(1);
+  // deeper layouts would need explicit patterns.
+  const MAX_GLOB_DEPTH = 12;
+  const maxdepth = rest.some((s) => s === "**") ? MAX_GLOB_DEPTH : rest.length;
   return { base, wholename: `${prefix}/${translated}`, maxdepth };
 }

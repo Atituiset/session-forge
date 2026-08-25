@@ -1,5 +1,6 @@
 import type { NirMessage } from "../nir/schema.ts";
 import type { Transport } from "../transport/types.ts";
+import { stableRev } from "./antigravity.ts";
 import type { FileGroup, Reader, ScanEvent } from "./util.ts";
 import { buildSession, extractTokens, makeMsg, readTextVia } from "./util.ts";
 
@@ -133,7 +134,7 @@ async function* scanFile(
       ...(sidechainCount > 0 ? { sidechainMessages: sidechainCount } : {}),
     },
   });
-  const rev = transport.kind === "local" ? (await Bun.file(file).lastModified) || 0 : Date.now();
+  const rev = await stableRev(transport, file);
   yield { kind: "session", sourceFile: file, rev, session };
 }
 

@@ -99,14 +99,16 @@ export class Store {
   }
 
   pruneOtherSessions(source: string, keepIds: Set<string>): number {
-    const rows = this.db.prepare("SELECT id FROM sessions WHERE source = ?").all(source) as {
-      id: string;
-    }[];
-    const stale = rows.filter((r) => !keepIds.has(r.id)).map((r) => r.id);
-    if (stale.length === 0) return 0;
-    const del = this.db.prepare("DELETE FROM sessions WHERE source = ? AND id = ?");
-    for (const id of stale) del.run(source, id);
-    return stale.length;
+    return this.transaction(() => {
+      const rows = this.db.prepare("SELECT id FROM sessions WHERE source = ?").all(source) as {
+        id: string;
+      }[];
+      const stale = rows.filter((r) => !keepIds.has(r.id)).map((r) => r.id);
+      if (stale.length === 0) return 0;
+      const del = this.db.prepare("DELETE FROM sessions WHERE source = ? AND id = ?");
+      for (const id of stale) del.run(source, id);
+      return stale.length;
+    });
   }
 
   setTags(source: string, id: string, tags: string[]): void {
@@ -134,9 +136,11 @@ export class Store {
   }
 
   findSession(idOrPrefix: string): NirSession | null {
+    // Escape LIKE wildcards so a prefix like "a%b" matches literally.
+    const pattern = idOrPrefix.replace(/([%_\\])/g, "\\$1");
     const row = this.db
-      .prepare("SELECT raw FROM sessions WHERE id = ? OR id LIKE ? LIMIT 1")
-      .get(idOrPrefix, `${idOrPrefix}%`) as { raw: string } | undefined;
+      .prepare("SELECT raw FROM sessions WHERE id = ? OR id LIKE ? ESCAPE '\\' LIMIT 1")
+      .get(idOrPrefix, `${pattern}%`) as { raw: string } | undefined;
     if (!row) return null;
     return JSON.parse(row.raw) as NirSession;
   }
@@ -174,8 +178,4 @@ function lastModel(session: NirSession): string | null {
     if (m?.model) return m.model;
   }
   return null;
-}
-
-function _numOrZero(v: unknown): number {
-  return typeof v === "number" ? v : 0;
 }

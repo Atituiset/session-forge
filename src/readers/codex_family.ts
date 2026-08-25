@@ -1,5 +1,6 @@
 import type { NirMessage } from "../nir/schema.ts";
 import type { Transport } from "../transport/types.ts";
+import { stableRev } from "./antigravity.ts";
 import type { FileGroup, Reader, ScanEvent } from "./util.ts";
 import {
   buildSession,
@@ -217,20 +218,13 @@ async function* scanKimi(
   }
 
   if (messages.length === 0) return;
-  for (const m of messages) {
-    if (m.role === "assistant" && !m.tokens) {
-      m.tokens = {
-        input: estTokens(m.content),
-        output: estTokens(m.content),
-        cacheRead: 0,
-        cacheWrite: 0,
-      };
-    }
-  }
+  // Estimated tokens must NOT be attached as message.tokens — enrich would
+  // misreport them as "reported" usage. Keep the estimate in rawMeta instead.
   const rawMeta: Record<string, unknown> = projectHint
     ? { projectHint, agent: agentName }
     : { agent: agentName };
   if (durationMs !== undefined) rawMeta.durationMs = durationMs;
+  rawMeta.estimatedTokens = [...messages].reduce((sum, m) => sum + estTokens(m.content), 0);
   const session = buildSession({
     id,
     source: toolId,
@@ -357,10 +351,5 @@ function firstString(obj: Record<string, unknown>, keys: string[]): string | und
 }
 
 async function revFor(transport: Transport, file: string): Promise<number> {
-  if (transport.kind !== "local") return Date.now();
-  try {
-    return (await Bun.file(file).lastModified) || 0;
-  } catch {
-    return 0;
-  }
+  return stableRev(transport, file);
 }
