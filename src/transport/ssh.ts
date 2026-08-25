@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import type { DirEntry, ExecResult, HostInfo, PlatformId, Transport } from "./types.ts";
 
 export class SshTransport implements Transport {
@@ -11,7 +12,7 @@ export class SshTransport implements Transport {
   }
 
   private baseArgs(extra: string[]): string[] {
-    const cmPath = `${process.env.HOME}/.ssh/session-forge-cm-%r@%h-%p`;
+    const cmPath = `${homedir()}/.ssh/session-forge-cm-%r@%h-%p`;
     return [
       "ssh",
       "-o",

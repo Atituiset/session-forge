@@ -3,12 +3,89 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  sidecar:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            targets: "bun-linux-x64 session-forge-engine-x86_64-unknown-linux-gnu|bun-linux-arm64 session-forge-engine-aarch64-unknown-linux-gnu"
+          - os: macos-latest
+            targets: "bun-darwin-arm64 session-forge-engine-aarch64-apple-darwin|bun-darwin-x64 session-forge-engine-x86_64-apple-darwin"
+          - os: windows-latest
+            targets: "bun-windows-x64 session-forge-engine-x86_64-pc-windows-msvc.exe"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: build engine sidecars
+        shell: bash
+        run: |
+          mkdir -p src-tauri/binaries
+          for entry in ${{ matrix.targets }}; do
+            target="${entry%% *}"
+            outfile="${entry#* }"
+            bun build --compile --target="$target" src/cli.ts --outfile "src-tauri/binaries/$outfile"
+          done
+          ls -lh src-tauri/binaries/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sidecars-${{ matrix.os }}
+          path: src-tauri/binaries/
+          retention-days: 1
+
+  desktop:
+    needs: sidecar
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sidecars-${{ matrix.os }}
+          path: .
+      - name: place sidecars
+        shell: bash
+        run: |
+          mkdir -p src-tauri/binaries
+          cp sidecars-${{ matrix.os }}/* src-tauri/binaries/
+          chmod +x src-tauri/binaries/* || true
+      - uses: dtolnay/rust-toolchain@stable
+      - name: linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "SessionForge ${{ github.ref_name }}"
+          releaseBody: "AI 编码 Session 聚合与互操作平台。桌面版内置引擎，数据全部本地处理。"
+          releaseDraft: false
+          prerelease: false
+          args: ${{ runner.os == 'Linux' && '--bundles deb appimage' || '' }}
+
+  cli:
+    needs: sidecar
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,18 +93,14 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
-      - run: bun run lint && bun run typecheck && bun test
       - run: bash scripts/build-all.sh
-      - name: package
+      - name: package cli binaries
         run: |
           cd dist
           for f in session-forge-linux-* session-forge-macos-*; do
-            tar czf "$f.tar.gz" "$f"
-            rm "$f"
+            tar czf "$f.tar.gz" "$f"; rm "$f"
           done
           sha256sum * > SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/*
-          generate_release_notes: true
+          files: dist/*

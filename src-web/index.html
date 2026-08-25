@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>SessionForge</title>
+<style>
+  :root {
+    --bg0: #070b14;
+    --bg1: #0a0f1d;
+    --bg2: #0e1526;
+    --card: rgba(18, 27, 48, 0.55);
+    --line: rgba(120, 160, 255, 0.12);
+    --txt: #dbe4ff;
+    --dim: #7c8db5;
+    --cyan: #22d3ee;
+    --violet: #a78bfa;
+    --amber: #fbbf24;
+    --red: #fb7185;
+    --green: #34d399;
+    --mono: "SF Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background:
+      radial-gradient(1100px 500px at 85% -10%, rgba(167,139,250,.14), transparent 60%),
+      radial-gradient(900px 480px at -10% 20%, rgba(34,211,238,.10), transparent 60%),
+      var(--bg0);
+    color: var(--txt);
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 14px;
+    overflow: hidden;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(ellipse at 50% 0%, black 30%, transparent 78%);
+    opacity: .25; pointer-events: none;
+  }
+
+  /* ── 标题栏 ─────────────────────────── */
+  .titlebar {
+    display: flex; align-items: center; gap: 10px;
+    height: 40px; padding-left: 14px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(10,15,29,.72);
+    backdrop-filter: blur(12px);
+    user-select: none; position: relative; z-index: 10;
+  }
+  .titlebar .logo { width: 18px; height: 18px; filter: drop-shadow(0 0 6px rgba(34,211,238,.8)); }
+  .titlebar .brand {
+    font-weight: 600; letter-spacing: .4px; font-size: 13px;
+    background: linear-gradient(90deg, var(--cyan), var(--violet));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .drag { flex: 1; height: 100%; }
+  .winbtns { display: flex; height: 100%; }
+  .winbtn {
+    width: 46px; height: 100%; border: 0; background: transparent; cursor: pointer;
+    display: grid; place-items: center; color: var(--dim); transition: all .15s;
+  }
+  .winbtn:hover { background: rgba(120,160,255,.12); color: var(--txt); }
+  .winbtn.close:hover { background: #e81123; color: #fff; }
+  .winbtn svg { width: 11px; height: 11px; }
+
+  /* ── 布局 ─────────────────────────── */
+  main { height: calc(100vh - 40px); overflow-y: auto; padding: 22px 26px 40px; }
+  main::-webkit-scrollbar { width: 9px; }
+  main::-webkit-scrollbar-thumb { background: rgba(120,160,255,.18); border-radius: 5px; }
+
+  header.hero { display: flex; align-items: center; gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
+  h1 {
+    font-size: 21px; letter-spacing: .5px; display: flex; align-items: center; gap: 10px;
+  }
+  h1 .hexmark { width: 30px; height: 30px; }
+  .livepill {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 11px; font-family: var(--mono); color: var(--green);
+    border: 1px solid rgba(52,211,153,.35); border-radius: 99px; padding: 4px 11px;
+    background: rgba(52,211,153,.07);
+  }
+  .livepill i { width: 7px; height: 7px; border-radius: 50%; background: var(--green);
+    animation: pulse 2s infinite; box-shadow: 0 0 8px var(--green); }
+  @keyframes pulse { 50% { opacity: .35 } }
+  .hero-actions { margin-left: auto; display: flex; gap: 10px; }
+  button.act {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 9px 18px; border-radius: 9px; cursor: pointer;
+    font-size: 13px; font-family: inherit; letter-spacing: .3px;
+    border: 1px solid var(--line); background: var(--card); color: var(--txt);
+    transition: all .18s; position: relative; overflow: hidden;
+  }
+  button.act:hover { transform: translateY(-1px); border-color: rgba(34,211,238,.45);
+    box-shadow: 0 4px 24px rgba(34,211,238,.18); }
+  button.act.primary {
+    background: linear-gradient(135deg, rgba(34,211,238,.18), rgba(167,139,250,.18));
+    border-color: rgba(34,211,238,.5);
+  }
+  button.act.primary::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(105deg, transparent 40%, rgba(255,255,255,.13) 50%, transparent 60%);
+    animation: shimmer 3.2s infinite;
+  }
+  @keyframes shimmer { 0% { transform: translateX(-100%) } 60%,100% { transform: translateX(100%) } }
+  button.act:disabled { opacity: .45; pointer-events: none; }
+  button.act svg { width: 15px; height: 15px; }
+
+  /* ── 卡片 ─────────────────────────── */
+  .grid-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 20px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px 18px; backdrop-filter: blur(10px); position: relative; overflow: hidden;
+    transition: all .2s;
+  }
+  .card:hover { border-color: rgba(34,211,238,.3); transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(0,0,0,.35); }
+  .card::before {
+    content: ""; position: absolute; top: 0; left: 18px; right: 60%; height: 2px;
+    background: linear-gradient(90deg, var(--cyan), transparent); border-radius: 2px;
+  }
+  .metric .label { font-size: 11px; color: var(--dim); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 8px; }
+  .metric .value { font-family: var(--mono); font-size: 26px; font-weight: 600;
+    background: linear-gradient(90deg, var(--txt), var(--cyan));
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .metric .sub { font-size: 11px; color: var(--dim); margin-top: 6px; font-family: var(--mono); }
+
+  .grid-main { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 1080px) { .grid-main { grid-template-columns: 1fr; } }
+  .col { display: flex; flex-direction: column; gap: 16px; }
+
+  .card h2 {
+    font-size: 12px; font-weight: 600; letter-spacing: 1.8px; text-transform: uppercase;
+    color: var(--dim); margin-bottom: 14px; display: flex; align-items: center; gap: 8px;
+  }
+  .card h2 svg { width: 14px; height: 14px; color: var(--cyan); }
+
+  .bars { display: flex; flex-direction: column; gap: 9px; }
+  .bar-row { display: grid; grid-template-columns: minmax(90px,150px) 1fr 84px; gap: 10px; align-items: center; font-size: 12.5px; }
+  .bar-row .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-track { height: 8px; background: rgba(120,160,255,.09); border-radius: 5px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 5px; width: 0;
+    background: linear-gradient(90deg, var(--cyan), var(--violet));
+    box-shadow: 0 0 10px rgba(34,211,238,.4);
+    transition: width .9s cubic-bezier(.2,.7,.3,1); }
+  .bar-row .num { text-align: right; font-family: var(--mono); font-size: 12px; color: var(--cyan); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th { text-align: left; color: var(--dim); font-weight: 500; font-size: 11px;
+    letter-spacing: 1px; text-transform: uppercase; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  td { padding: 8px; border-bottom: 1px solid rgba(120,160,255,.06); }
+  td.num { text-align: right; font-family: var(--mono); color: var(--cyan); }
+  tr:hover td { background: rgba(120,160,255,.05); }
+  .chip { font-size: 10.5px; font-family: var(--mono); padding: 2px 8px; border-radius: 5px;
+    background: rgba(167,139,250,.13); color: var(--violet); border: 1px solid rgba(167,139,250,.3); }
+  .flame { color: var(--amber); }
+
+  .donut-wrap { display: flex; gap: 20px; align-items: center; justify-content: space-around; flex-wrap: wrap; }
+  .legend { font-size: 12px; display: flex; flex-direction: column; gap: 7px; }
+  .legend span i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 8px; }
+  .legend b { font-family: var(--mono); margin-left: 8px; font-weight: 500; color: var(--dim); }
+
+  footer { margin-top: 26px; text-align: center; color: var(--dim); font-size: 11px; font-family: var(--mono); opacity: .6; }
+  .toast {
+    position: fixed; bottom: 24px; right: 24px; z-index: 99;
+    background: var(--bg2); border: 1px solid rgba(34,211,238,.4); border-radius: 10px;
+    padding: 12px 18px; font-size: 13px; display: none; align-items: center; gap: 10px;
+    box-shadow: 0 8px 40px rgba(0,0,0,.5), 0 0 20px rgba(34,211,238,.15);
+  }
+  .toast.show { display: flex; animation: slidein .25s ease-out; }
+  @keyframes slidein { from { transform: translateY(14px); opacity: 0 } }
+  .spinner { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--cyan);
+    border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg) } }
+</style>
+</head>
+<body>
+
+<div class="titlebar">
+  <svg class="logo" viewBox="0 0 64 64"><polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="none" stroke="#22d3ee" stroke-width="4"/><circle cx="32" cy="32" r="7" fill="#fbbf24"/></svg>
+  <span class="brand">SESSIONFORGE</span>
+  <span class="drag" data-tauri-drag-region></span>
+  <div class="winbtns">
+    <button class="winbtn" id="btn-min" title="最小化">
+      <svg viewBox="0 0 11 11"><rect x="0" y="5" width="11" height="1" fill="currentColor"/></svg>
+    </button>
+    <button class="winbtn" id="btn-max" title="放大 / 还原">
+      <svg viewBox="0 0 11 11"><path d="M1.5 1.5h8v8h-8z M3.5 3.5h4v4h-4z" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+    </button>
+    <button class="winbtn close" id="btn-close" title="隐藏到托盘">
+      <svg viewBox="0 0 11 11"><path d="M1 1 L10 10 M10 1 L1 10" stroke="currentColor" stroke-width="1.2"/></svg>
+    </button>
+  </div>
+</div>
+
+<main>
+  <header class="hero">
+    <h1>
+      <svg class="hexmark" viewBox="0 0 64 64"><defs><linearGradient id="hg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a78bfa"/></linearGradient></defs><polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="none" stroke="url(#hg)" stroke-width="4"/><polygon points="32,17 43,24 43,40 32,47 21,40 21,24" fill="rgba(34,211,238,.08)" stroke="rgba(167,139,250,.5)" stroke-width="1.5"/><circle cx="32" cy="32" r="5.5" fill="#fbbf24"/></svg>
+      认知资产面板
+    </h1>
+    <span class="livepill"><i></i>LOCAL · 数据不出本机</span>
+    <div class="hero-actions">
+      <button class="act primary" id="btn-scan">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3.4"/></svg>
+        扫描全部 Agent
+      </button>
+      <button class="act" id="btn-export">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M4 19h16"/></svg>
+        导出知识库
+      </button>
+    </div>
+  </header>
+
+  <section class="grid-metrics" id="metrics"></section>
+
+  <div class="grid-main">
+    <div class="col">
+      <div class="card">
+        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 20h18M6 16v-5M11 16V7M16 16v-8M21 16V4"/></svg>编码活跃度 · 近期按日会话数</h2>
+        <div class="bars" id="activity"></div>
+      </div>
+      <div class="card">
+        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h8l6 6v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg>项目热度榜 · 按 Token 消耗</h2>
+        <table id="projects"></table>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="card">
+        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>模型分布</h2>
+        <div class="donut-wrap" id="models-donut"></div>
+      </div>
+      <div class="card">
+        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2c2 4 6 5.5 6 10a6 6 0 0 1-12 0c0-4.5 4-6 6-10z"/></svg>高频修改文件</h2>
+        <div class="bars" id="files"></div>
+      </div>
+      <div class="card">
+        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="flame" style="color:var(--amber)"><path d="M12 2c2 4 6 5.5 6 10a6 6 0 0 1-12 0c0-4.5 4-6 6-10z"/></svg>黑洞会话 · 技术债务候选</h2>
+        <table id="blackholes"></table>
+      </div>
+    </div>
+  </div>
+
+  <footer id="foot">SESSIONFORGE ENGINE</footer>
+</main>
+
+<div class="toast" id="toast"><div class="spinner"></div><span id="toast-msg">扫描中…</span></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => n >= 1e9 ? (n/1e9).toFixed(2)+"G" : n >= 1e6 ? (n/1e6).toFixed(2)+"M" : n >= 1e3 ? (n/1e3).toFixed(1)+"k" : String(n);
+const isTauri = typeof window.__TAURI_INTERNALS__ !== "undefined";
+
+/* ── 窗口控制（最小化 / 放大 / 隐藏到托盘） ── */
+if (isTauri) {
+  const w = window.__TAURI__.window.getCurrentWindow();
+  $("btn-min").onclick = () => w.minimize();
+  $("btn-max").onclick = () => w.toggleMaximize();
+  $("btn-close").onclick = () => w.hide();
+} else {
+  document.querySelector(".winbtns").style.display = "none";
+}
+
+async function loadData() {
+  const d = await (await fetch("http://127.0.0.1:4177/api/data")).json();
+  render(d);
+}
+
+function render(d) {
+  const t = d.totals;
+  $("metrics").innerHTML = [
+    ["Sessions", fmt(t.sessions), `${t.projects} 个项目`],
+    ["交互轮次", fmt(t.rounds), "user → assistant 往返"],
+    ["代码变更", `+${fmt(t.additions)}`, `-${fmt(t.deletions)} 行`],
+    ["Token 消耗", fmt(t.tokensIn), `out ${fmt(t.tokensOut)}`],
+  ].map(([l, v, s]) =>
+    `<div class="card metric"><div class="label">${l}</div><div class="value">${v}</div><div class="sub">${s}</div></div>`
+  ).join("");
+
+  const maxAct = Math.max(...d.activity.map(a => a.sessions), 1);
+  $("activity").innerHTML = d.activity.slice(-14).map(a =>
+    `<div class="bar-row"><span class="name">${a.bucket}</span>
+     <div class="bar-track"><div class="bar-fill" style="width:${(a.sessions/maxAct*100).toFixed(1)}%"></div></div>
+     <span class="num">${a.sessions}</span></div>`
+  ).join("") || "<p style='color:var(--dim)'>暂无数据，点击右上角扫描。</p>";
+
+  const maxP = Math.max(...d.projects.map(p => p.tokensIn), 1);
+  $("projects").innerHTML =
+    `<tr><th>项目</th><th>来源</th><th style="text-align:right">会话</th><th style="text-align:right">变更</th><th style="text-align:right">Tokens</th></tr>` +
+    d.projects.map(p =>
+      `<tr><td>${esc(p.project)}</td><td><span class="chip">${p.source}</span></td>
+       <td class="num">${p.sessions}</td><td class="num" style="color:var(--green)">+${fmt(p.additions)}</td>
+       <td class="num">${fmt(p.tokensIn)}</td></tr>`
+    ).join("");
+
+  renderDonut(d.models);
+
+  const maxF = Math.max(...d.topFiles.map(f => f.count), 1);
+  $("files").innerHTML = d.topFiles.slice(0, 8).map(f =>
+    `<div class="bar-row"><span class="name" title="${esc(f.file)}">${esc(short(f.file))}</span>
+     <div class="bar-track"><div class="bar-fill" style="width:${(f.count/maxF*100).toFixed(1)}%"></div></div>
+     <span class="num">${f.count}</span></div>`
+  ).join("");
+
+  $("blackholes").innerHTML =
+    `<tr><th>来源</th><th>项目</th><th style="text-align:right">轮次</th></tr>` +
+    d.blackholes.map(b =>
+      `<tr><td><span class="chip">${b.source}</span></td>
+       <td title="${esc(b.id)}">${esc(short(b.project || b.id, 26))}</td>
+       <td class="num flame" style="text-align:right;font-family:var(--mono);color:var(--amber)">${b.rounds} ⟳</td></tr>`
+    ).join("");
+
+  $("foot").textContent = `SESSIONFORGE ENGINE · ${d.generatedAt.replace("T", " ").slice(0, 19)} · 本地数据 · 未联网`;
+}
+
+function renderDonut(models) {
+  const colors = ["#22d3ee", "#a78bfa", "#fbbf24", "#34d399", "#fb7185", "#60a5fa", "#f472b6"];
+  const total = models.reduce((s, m) => s + m.tokensIn, 0) || 1;
+  let angle = -Math.PI / 2;
+  const cx = 62, cy = 62, r = 46, sw = 16;
+  let paths = "";
+  models.slice(0, 7).forEach((m, i) => {
+    const frac = m.tokensIn / total;
+    const a0 = angle, a1 = angle + frac * Math.PI * 2;
+    angle = a1;
+    const large = frac > 0.5 ? 1 : 0;
+    const x0 = cx + r * Math.cos(a0), y0 = cy + r * Math.sin(a0);
+    const x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1);
+    if (frac > 0.999) {
+      paths += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${colors[i % colors.length]}" stroke-width="${sw}"/>`;
+    } else {
+      paths += `<path d="M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1}" fill="none" stroke="${colors[i % colors.length]}" stroke-width="${sw}" stroke-linecap="butt"/>`;
+    }
+  });
+  const legend = models.slice(0, 7).map((m, i) =>
+    `<span><i style="background:${colors[i % colors.length]}"></i>${esc(m.model)}<b>${fmt(m.tokensIn)}</b></span>`
+  ).join("");
+  $("models-donut").innerHTML =
+    `<svg width="124" height="124" style="filter:drop-shadow(0 0 12px rgba(34,211,238,.25))">
+       <circle cx="62" cy="62" r="46" fill="none" stroke="rgba(120,160,255,.08)" stroke-width="16"/>${paths}
+       <text x="62" y="58" text-anchor="middle" fill="#dbe4ff" font-size="13" font-family="var(--mono)" font-weight="600">${models.length}</text>
+       <text x="62" y="74" text-anchor="middle" fill="#7c8db5" font-size="9">模型</text>
+     </svg><div class="legend">${legend}</div>`;
+}
+
+async function runScan() {
+  const btn = $("btn-scan");
+  btn.disabled = true;
+  $("toast").classList.add("show");
+  try {
+    const res = await fetch("http://127.0.0.1:4177/api/scan", { method: "POST" });
+    const j = await res.json();
+    $("toast-msg").textContent = res.ok ? `扫描完成：${j.summary?.tools?.length ?? 0} 个数据源` : "扫描失败";
+    await loadData();
+  } catch (e) {
+    $("toast-msg").textContent = "引擎未响应";
+  } finally {
+    setTimeout(() => { $("toast").classList.remove("show"); $("toast-msg").textContent = "扫描中…"; btn.disabled = false; }, 1800);
+  }
+}
+
+$("btn-scan").onclick = runScan;
+$("btn-export").onclick = () => {
+  window.open("http://127.0.0.1:4177/api/data", "_blank");
+};
+
+if (isTauri) {
+  window.__TAURI__.event.listen("trigger-scan", () => runScan());
+}
+loadData().catch(() => { $("foot").textContent = "引擎未启动：请通过桌面应用打开，或运行 session-forge serve"; });
+setInterval(loadData, 30000);
+
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function short(s, n = 28) { return s.length > n ? "…" + s.slice(-n + 1) : s; }
+</script>
+</body>
+</html>

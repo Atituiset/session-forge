@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { enrichSession } from "./enrich/index.ts";
 import type { NirSession } from "./nir/schema.ts";
@@ -163,7 +164,7 @@ export interface StoredSession {
 }
 
 export function defaultStorePath(): string {
-  const root = process.env.SESSION_FORGE_HOME ?? `${process.env.HOME}/.session-forge`;
+  const root = process.env.SESSION_FORGE_HOME ?? path.join(homedir(), ".session-forge");
   return path.join(root, "cache.db");
 }
 

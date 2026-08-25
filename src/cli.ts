@@ -261,6 +261,70 @@ program
     }
   });
 
+program
+  .command("serve")
+  .description("Run the local data API server (used by desktop panel and ui command)")
+  .option("--port <n>", "listen port", "4177")
+  .option("--db <path>", "cache database path", defaultStorePath())
+  .option("--headless", "suppress console banner")
+  .action(async (opts: { port: string; db: string; headless?: boolean }) => {
+    const store = new Store(opts.db);
+    const transport = new LocalTransport();
+    let scanning = false;
+    let lastScan: import("./discovery.ts").DiscoveryReport | null = null;
+
+    const server = Bun.serve({
+      port: Number.parseInt(opts.port, 10),
+      async fetch(req) {
+        const url = new URL(req.url);
+        if (url.pathname === "/api/data") {
+          return Response.json(buildDashboardData(store));
+        }
+        if (url.pathname === "/api/scan" && req.method === "POST") {
+          if (scanning) return Response.json({ status: "busy" }, { status: 409 });
+          scanning = true;
+          try {
+            lastScan = await discoverAndIngest(transport, store);
+            return Response.json({ status: "ok", summary: lastScan });
+          } catch (err) {
+            return Response.json({ status: "error", error: String(err) }, { status: 500 });
+          } finally {
+            scanning = false;
+          }
+        }
+        if (url.pathname === "/api/health") {
+          return Response.json({ ok: true, scanning });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    if (!opts.headless) {
+      console.log(`SessionForge engine listening on http://127.0.0.1:${server.port}`);
+    }
+    setInterval(() => {}, 60_000);
+  });
+
+function buildDashboardData(store: Store): Record<string, unknown> {
+  const rows = store.allSessions();
+  return {
+    generatedAt: new Date().toISOString(),
+    totals: totals(rows),
+    projects: aggregateByProject(rows, 12),
+    activity: aggregateByTime(rows, "day", 42),
+    topFiles: topFiles(rows, 12),
+    models: byModel(rows),
+    blackholes: blackholes(rows, 5)
+      .slice(0, 10)
+      .map((b) => ({
+        source: b.source,
+        id: b.id,
+        project: b.projectPath,
+        rounds: b.rounds,
+        tokensIn: b.tokensIn,
+      })),
+  };
+}
+
 function safeParseFiles(json: string): string[] {
   try {
     return JSON.parse(json) as string[];

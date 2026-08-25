@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SessionForge",
+  "version": "0.1.1",
+  "identifier": "com.sessionforge.app",
+  "build": {
+    "frontendDist": "../src-web"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "SessionForge",
+        "width": 1360,
+        "height": 900,
+        "minWidth": 1000,
+        "minHeight": 660,
+        "center": true,
+        "decorations": false,
+        "shadow": true,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:* http://localhost:*"
+    },
+    "trayIconTooltip": "SessionForge"
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "dmg", "deb", "appimage"],
+    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "externalBin": ["sidecar/session-forge-engine"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"]
+      }
+    }
+  }
+}

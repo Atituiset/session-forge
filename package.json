@@ -1,6 +1,6 @@
 {
   "name": "session-forge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Aggregate AI coding agent sessions into searchable, reusable knowledge assets",
   "type": "module",
   "bin": {
@@ -11,7 +11,10 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
-    "build": "bun build --compile src/cli.ts --outfile dist/session-forge"
+    "build": "bun build --compile src/cli.ts --outfile dist/session-forge",
+    "tauri": "tauri",
+    "desktop": "tauri dev",
+    "desktop:build": "tauri build"
   },
   "dependencies": {
     "commander": "^15.0.0",
@@ -19,6 +22,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.10",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/bun": "^1.4.0",
     "typescript": "^7.0.2"
   }

@@ -1,4 +1,7 @@
 {
+  "files": {
+    "includes": ["**", "!src-web", "!src-tauri", "!assets", "!dist"]
+  },
   "linter": {
     "enabled": true,
     "rules": {
