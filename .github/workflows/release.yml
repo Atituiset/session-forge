@@ -16,11 +16,16 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            targets: "bun-linux-x64 session-forge-engine-x86_64-unknown-linux-gnu|bun-linux-arm64 session-forge-engine-aarch64-unknown-linux-gnu"
+            targets: |
+              bun-linux-x64 session-forge-engine-x86_64-unknown-linux-gnu
+              bun-linux-arm64 session-forge-engine-aarch64-unknown-linux-gnu
           - os: macos-latest
-            targets: "bun-darwin-arm64 session-forge-engine-aarch64-apple-darwin|bun-darwin-x64 session-forge-engine-x86_64-apple-darwin"
+            targets: |
+              bun-darwin-arm64 session-forge-engine-aarch64-apple-darwin
+              bun-darwin-x64 session-forge-engine-x86_64-apple-darwin
           - os: windows-latest
-            targets: "bun-windows-x64 session-forge-engine-x86_64-pc-windows-msvc.exe"
+            targets: |
+              bun-windows-x64 session-forge-engine-x86_64-pc-windows-msvc.exe
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -29,11 +34,13 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: build engine sidecars
         shell: bash
+        env:
+          TARGETS: ${{ matrix.targets }}
         run: |
           mkdir -p src-tauri/binaries
-          for entry in ${{ matrix.targets }}; do
-            target="${entry%% *}"
-            outfile="${entry#* }"
+          echo "$TARGETS" | while read -r target outfile; do
+            [ -z "$target" ] && continue
+            echo "==> $target -> $outfile"
             bun build --compile --target="$target" src/cli.ts --outfile "src-tauri/binaries/$outfile"
           done
           ls -lh src-tauri/binaries/
