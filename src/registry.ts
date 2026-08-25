@@ -1,5 +1,3 @@
-import path from "node:path";
-
 export type PlatformId = "linux" | "darwin" | "win32";
 
 export type ReaderFamily =
@@ -76,8 +74,9 @@ export const TOOLS: ToolSpec[] = [
 ];
 
 export function expandHome(pattern: string, homeDir: string): string {
-  if (pattern === "~") return homeDir;
-  if (pattern.startsWith("~/")) return path.join(homeDir, pattern.slice(2));
+  const base = homeDir.replace(/\/+$/, "");
+  if (pattern === "~") return base;
+  if (pattern.startsWith("~/")) return `${base}/${pattern.slice(2)}`;
   return pattern;
 }
 
