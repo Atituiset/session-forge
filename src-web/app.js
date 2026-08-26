@@ -274,6 +274,176 @@ $("btn-remote-add").onclick = async () => {
   loadRemotes();
 };
 
+/* ── 会话浏览：列表 + 详情浮层 ── */
+const sessionsQuery = { q: "", source: "", offset: 0 };
+let sessionsTotal = 0;
+let lastSessionRows = [];
+const knownSources = [];
+let openSession = null;
+const SESSION_PAGE = 50;
+
+const fmtTime = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+
+async function loadSessions() {
+  const params = new URLSearchParams({ limit: String(SESSION_PAGE), offset: String(sessionsQuery.offset) });
+  if (sessionsQuery.q) params.set("q", sessionsQuery.q);
+  if (sessionsQuery.source) params.set("source", sessionsQuery.source);
+  try {
+    const j = await (await fetch(`${API}/api/sessions?${params}`)).json();
+    renderSessions(j);
+  } catch {}
+}
+
+function renderSessions(j) {
+  const list = j.sessions ?? [];
+  lastSessionRows = list;
+  sessionsTotal = j.total ?? list.length;
+  $("session-count").textContent = sessionsTotal ? `${sessionsTotal}` : "";
+  const sel = $("session-source");
+  const prev = sel.value;
+  for (const s of list) if (!knownSources.includes(s.source)) knownSources.push(s.source);
+  sel.innerHTML = `<option value="">全部来源</option>` +
+    knownSources.map((s) => `<option value="${esc(s)}"${s === prev ? " selected" : ""}>${esc(s)}</option>`).join("");
+  const el = $("sessions");
+  if (!list.length) {
+    el.innerHTML = `<div class="remote-empty">没有匹配的会话</div>`;
+  } else {
+    el.innerHTML = list.map((s) => `<div class="session-row" data-source="${esc(s.source)}" data-id="${esc(s.id)}">
+      <span class="chip">${esc(s.source)}</span>
+      <div class="meta">
+        <span class="proj" title="${esc(s.projectPath || s.id)}">${esc(short(s.projectPath || s.id, 40))}</span>
+        <span class="sub">${fmtTime(s.startedAt)}${s.endedAt ? ` → ${fmtTime(s.endedAt)}` : ""}</span>
+      </div>
+      <div class="stats">${s.rounds} 轮<b>${fmt(s.tokensIn)} tok</b></div>
+    </div>`).join("");
+    el.querySelectorAll(".session-row").forEach((r) => {
+      r.onclick = () => openSessionDetail(r.dataset.source, r.dataset.id);
+    });
+  }
+  $("session-prev").disabled = sessionsQuery.offset <= 0;
+  $("session-next").disabled = sessionsQuery.offset + SESSION_PAGE >= sessionsTotal;
+  $("session-page-info").textContent = sessionsTotal
+    ? `${sessionsQuery.offset + 1}–${Math.min(sessionsQuery.offset + SESSION_PAGE, sessionsTotal)} / ${sessionsTotal}`
+    : "";
+}
+
+async function openSessionDetail(source, id) {
+  openSession = { source, id };
+  $("session-overlay").classList.add("show");
+  $("session-detail").innerHTML =
+    `<div class="sess-head"><div class="spinner"></div><span style="color:var(--dim)">加载会话…</span></div>`;
+  await refreshSessionDetail();
+}
+
+async function refreshSessionDetail() {
+  if (!openSession) return;
+  const { source, id } = openSession;
+  try {
+    const res = await fetch(`${API}/api/session?source=${encodeURIComponent(source)}&id=${encodeURIComponent(id)}`);
+    if (res.status === 404) { closeSessionDetail(); return; }
+    const j = await res.json();
+    // The user may have closed or switched sessions while fetching.
+    if (!openSession || openSession.source !== source || openSession.id !== id) return;
+    renderSessionDetail(j);
+  } catch {}
+}
+
+function closeSessionDetail() {
+  openSession = null;
+  $("session-overlay").classList.remove("show");
+}
+
+const pretty = (v) => {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+};
+
+const longPre = (text) => {
+  const t = text ?? "";
+  if (t.length <= 2000) return `<pre>${esc(t)}</pre>`;
+  return `<pre>${esc(t.slice(0, 2000))}…</pre>
+    <details class="expand"><summary>展开全部</summary><pre>${esc(t)}</pre></details>`;
+};
+
+function renderMsg(m) {
+  const when = m.timestamp ? `<time>${fmtTime(m.timestamp)}</time>` : "";
+  if (m.role === "system") {
+    return `<div class="msg system">${esc(short(m.content ?? "", 300))}</div>`;
+  }
+  if (m.role === "tool") {
+    return `<div class="msg tool"><details>
+      <summary>工具 · ${esc(m.toolName ?? "tool")}${m.timestamp ? ` · ${fmtTime(m.timestamp)}` : ""}</summary>
+      ${m.toolInput != null ? longPre(pretty(m.toolInput)) : ""}
+      ${m.content ? longPre(m.content) : ""}
+    </details></div>`;
+  }
+  const thinking = m.thinking
+    ? `<details class="thinking"><summary>思考过程</summary><pre>${esc(m.thinking)}</pre></details>`
+    : "";
+  return `<div class="msg ${m.role === "user" ? "user" : "assistant"}">
+    <div class="who">${m.role === "user" ? "USER" : `ASSISTANT${m.model ? ` · ${esc(m.model)}` : ""}`}${when}</div>
+    ${thinking}
+    ${m.content ? `<div class="body">${esc(m.content)}</div>` : ""}
+  </div>`;
+}
+
+function renderSessionDetail(j) {
+  const row = lastSessionRows.find((s) => s.source === j.source && s.id === j.id);
+  const stats = row
+    ? `<b>${fmt(row.tokensIn)}</b> in · <b>${fmt(row.tokensOut)}</b> out · <b>${row.rounds}</b> 轮`
+    : `<b>${(j.messages ?? []).length}</b> 条消息`;
+  const head = `<div class="sess-head">
+    <span class="chip">${esc(j.source)}</span>
+    <span class="proj" title="${esc(j.projectPath || j.id)}">${esc(short(j.projectPath || j.id, 56))}</span>
+    <span class="stats">${fmtTime(j.startedAt)}${j.endedAt ? ` → ${fmtTime(j.endedAt)}` : ""} · ${stats}</span>
+    <button class="mini-btn sess-close" type="button" id="session-close">关闭 ✕</button>
+  </div>`;
+  const body = (j.messages ?? []).map(renderMsg).join("") || `<div class="remote-empty">此会话没有消息</div>`;
+  const panel = $("session-detail");
+  const st = panel.scrollTop;
+  panel.innerHTML = head + body;
+  panel.scrollTop = st;
+  $("session-close").onclick = closeSessionDetail;
+}
+
+let searchTimer = null;
+$("session-search").addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    sessionsQuery.q = $("session-search").value.trim();
+    sessionsQuery.offset = 0;
+    loadSessions();
+  }, 300);
+});
+$("session-source").onchange = () => {
+  sessionsQuery.source = $("session-source").value;
+  sessionsQuery.offset = 0;
+  loadSessions();
+};
+$("session-prev").onclick = () => {
+  sessionsQuery.offset = Math.max(0, sessionsQuery.offset - SESSION_PAGE);
+  loadSessions();
+};
+$("session-next").onclick = () => {
+  if (sessionsQuery.offset + SESSION_PAGE < sessionsTotal) {
+    sessionsQuery.offset += SESSION_PAGE;
+    loadSessions();
+  }
+};
+$("session-overlay").addEventListener("click", (e) => {
+  if (e.target === $("session-overlay")) closeSessionDetail();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && openSession) closeSessionDetail();
+});
+
 $("btn-scan").onclick = runScan;
 $("btn-export").onclick = () => window.open(`${API}/api/data`, "_blank");
 
@@ -293,6 +463,7 @@ if (hasTauriBridge) {
   if (online) {
     loadData().catch(() => {});
     loadRemotes();
+    loadSessions();
     // First launch (or empty db): kick off an automatic scan so the panel
     // is never a wall of empty cards.
     try {
@@ -306,3 +477,10 @@ if (hasTauriBridge) {
 setInterval(checkEngine, 5000);
 setInterval(loadData, 30000);
 setInterval(() => { if (engineOnline) loadRemotes(); }, 3000);
+// Sessions refresh: skip the list while the user is typing in the search box;
+// live-update the open detail view so an actively-growing session stays fresh.
+setInterval(() => {
+  if (!engineOnline) return;
+  if (document.activeElement !== $("session-search")) loadSessions();
+  if (openSession) refreshSessionDetail();
+}, 15000);

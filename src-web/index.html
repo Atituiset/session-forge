@@ -208,6 +208,78 @@
   .mini-btn.danger:hover { background: rgba(251,113,133,.12); }
   .mini-btn:disabled { opacity: .4; cursor: default; }
 
+  /* ── 会话浏览 ─────────────────────────── */
+  .session-tools { display: flex; gap: 8px; margin-bottom: 10px; }
+  .session-tools input, .session-tools select {
+    background: rgba(10,15,29,.85); border: 1px solid var(--line); border-radius: 7px;
+    color: var(--txt); padding: 7px 10px; font-family: var(--mono); font-size: 12px;
+    outline: none; transition: border-color .15s;
+  }
+  .session-tools input { flex: 1; min-width: 0; }
+  .session-tools input:focus, .session-tools select:focus {
+    border-color: rgba(34,211,238,.55); box-shadow: 0 0 0 2px rgba(34,211,238,.12);
+  }
+  .session-list { max-height: 420px; overflow-y: auto; padding-right: 2px; }
+  .session-list::-webkit-scrollbar { width: 8px; }
+  .session-list::-webkit-scrollbar-thumb { background: rgba(120,160,255,.18); border-radius: 4px; }
+  .session-row { display: flex; align-items: center; gap: 10px; padding: 9px 11px;
+    border: 1px solid var(--line); border-radius: 9px; margin-bottom: 8px;
+    font-family: var(--mono); font-size: 12px; background: rgba(14,21,38,.4);
+    cursor: pointer; transition: border-color .2s, background .2s; }
+  .session-row:hover { border-color: rgba(34,211,238,.35); background: rgba(34,211,238,.05); }
+  .session-row .meta { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+  .session-row .proj { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .session-row .sub { font-size: 10px; color: var(--dim); margin-top: 2px; }
+  .session-row .stats { text-align: right; font-size: 11px; color: var(--cyan); flex-shrink: 0; }
+  .session-row .stats b { display: block; color: var(--dim); font-weight: 500; margin-top: 2px; }
+  .session-pager { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+  .session-pager .page-info { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+
+  /* ── 会话详情浮层 ─────────────────────── */
+  .overlay { position: fixed; inset: 0; z-index: 50; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(4,8,18,.72); backdrop-filter: blur(8px); }
+  .overlay.show { display: flex; animation: fadein .18s ease-out; }
+  @keyframes fadein { from { opacity: 0 } }
+  .overlay-panel { width: min(860px, calc(100vw - 48px)); max-height: 84vh; overflow-y: auto;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px 20px; backdrop-filter: blur(14px);
+    box-shadow: 0 18px 60px rgba(0,0,0,.55); }
+  .overlay-panel::-webkit-scrollbar { width: 9px; }
+  .overlay-panel::-webkit-scrollbar-thumb { background: rgba(120,160,255,.18); border-radius: 5px; }
+  .sess-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding-bottom: 12px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
+  .sess-head .proj { font-family: var(--mono); font-size: 13px; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sess-head .stats { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+  .sess-head .stats b { color: var(--cyan); font-weight: 500; }
+  .sess-close { margin-left: auto; }
+  .msg { border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px;
+    margin-bottom: 10px; font-size: 13px; line-height: 1.6; }
+  .msg .who { font-family: var(--mono); font-size: 10px; letter-spacing: 1.2px;
+    text-transform: uppercase; color: var(--dim); display: flex; gap: 8px;
+    align-items: center; margin-bottom: 6px; }
+  .msg .who time { margin-left: auto; }
+  .msg .body { white-space: pre-wrap; word-break: break-word; }
+  .msg.user { background: rgba(34,211,238,.07); border-right: 3px solid var(--cyan); }
+  .msg.assistant { background: rgba(167,139,250,.07); border-left: 3px solid var(--violet); }
+  .msg.system { background: transparent; border-style: dashed; color: var(--dim);
+    text-align: center; font-size: 12px; }
+  .msg.tool { background: rgba(14,21,38,.5); font-family: var(--mono); font-size: 12px; color: var(--dim); }
+  .msg pre { font-family: var(--mono); font-size: 11.5px; white-space: pre-wrap; word-break: break-word; }
+  .msg details summary { cursor: pointer; user-select: none; list-style: none;
+    display: flex; align-items: center; gap: 6px; font-family: var(--mono);
+    font-size: 11px; color: var(--cyan); }
+  .msg details summary::-webkit-details-marker { display: none; }
+  .msg details summary::before { content: "▸"; transition: transform .15s; }
+  .msg details[open] summary::before { transform: rotate(90deg); }
+  .msg details pre { margin-top: 8px; padding: 8px 10px; border-radius: 7px;
+    background: rgba(10,15,29,.85); border: 1px solid var(--line); overflow-x: auto; }
+  .msg .thinking { border-left: 3px solid var(--amber); border-radius: 8px;
+    background: rgba(167,139,250,.06); padding: 7px 10px; margin: 8px 0 2px;
+    font-style: italic; color: var(--dim); font-size: 12px; }
+  .msg .thinking summary { color: var(--amber); }
+
   footer { margin-top: 26px; text-align: center; color: var(--dim); font-size: 11px; font-family: var(--mono); opacity: .6; }
   .toast {
     position: fixed; bottom: 24px; right: 24px; z-index: 99;
@@ -272,6 +344,19 @@
         <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h8l6 6v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg>项目热度榜 · 按 Token 消耗</h2>
         <table id="projects"></table>
       </div>
+      <div class="card">
+        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>会话浏览 <span class="count-pill" id="session-count"></span></h2>
+        <div class="session-tools">
+          <input id="session-search" placeholder="搜索项目或会话 id…" />
+          <select id="session-source"><option value="">全部来源</option></select>
+        </div>
+        <div class="session-list" id="sessions"></div>
+        <div class="session-pager">
+          <button class="mini-btn" id="session-prev" type="button">上一页</button>
+          <button class="mini-btn" id="session-next" type="button">下一页</button>
+          <span class="page-info" id="session-page-info"></span>
+        </div>
+      </div>
     </div>
 
     <div class="col">
@@ -308,6 +393,10 @@
 
   <footer id="foot">SESSIONFORGE ENGINE</footer>
 </main>
+
+<div class="overlay" id="session-overlay">
+  <div class="overlay-panel" id="session-detail"></div>
+</div>
 
 <div class="toast" id="toast"><div class="spinner" id="toast-spin"></div><span id="toast-msg">扫描中…</span></div>
 
