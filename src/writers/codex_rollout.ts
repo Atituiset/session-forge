@@ -40,6 +40,21 @@ export function toCodexRollout(session: NirSession): ConvertReport {
   let callCounter = 0;
   for (const m of session.messages) {
     const when = m.timestamp ?? ts(start);
+    if (m.role === "assistant" && m.thinking) {
+      lines.push(
+        JSON.stringify({
+          timestamp: when,
+          type: "response_item",
+          payload: {
+            type: "reasoning",
+            summary: [{ type: "summary_text", text: m.thinking }],
+          },
+        }),
+      );
+      // A thinking-only message is fully represented by the reasoning item;
+      // one with content/toolName is counted by its own branch below.
+      if (!m.content && !m.toolName) converted++;
+    }
     if (m.role === "user" || (m.role === "system" && m.content)) {
       converted++;
       lines.push(

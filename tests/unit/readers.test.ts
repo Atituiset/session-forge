@@ -41,8 +41,12 @@ describe("codex-family reader", () => {
     expect(s.sourceVersion).toBe("0.118.0");
     const roles = s.messages.map((m) => m.role);
     expect(roles.filter((x) => x === "user")).toHaveLength(1);
-    expect(roles.filter((x) => x === "assistant")).toHaveLength(3);
+    expect(roles.filter((x) => x === "assistant")).toHaveLength(4);
     expect(roles.filter((x) => x === "tool")).toHaveLength(1);
+    const thinking = s.messages.find((m) => m.thinking);
+    expect(thinking?.role).toBe("assistant");
+    expect(thinking?.content).toBe("");
+    expect(thinking?.thinking).toContain("missing null check");
     const toolMsg = s.messages.find((m) => m.toolName === "exec_command");
     expect(toolMsg?.toolInput).toEqual({ cmd: "rg login src" });
     expect(s.rawMeta.patchFiles).toEqual(["src/auth.ts"]);
@@ -65,6 +69,9 @@ describe("codex-family reader", () => {
     expect(s.messages[0]?.role).toBe("user");
     const assistantWithTool = s.messages.find((m) => m.toolName === "exec_command");
     expect(assistantWithTool?.toolInput).toEqual({ cmd: "mkdocs gh-deploy" });
+    const thinking = s.messages.find((m) => m.thinking);
+    expect(thinking?.role).toBe("assistant");
+    expect(thinking?.thinking).toContain("mkdocs gh-deploy is the simplest path");
     expect(s.rawMeta.projectHint).toBeUndefined();
   });
 
@@ -110,7 +117,13 @@ describe("claude-code reader", () => {
     expect(s.sourceVersion).toBe("2.1.0");
     expect(s.startedAt).toBe("2026-05-01T10:00:00.000Z");
     const roles = s.messages.map((m) => m.role);
-    expect(roles).toEqual(["user", "assistant", "assistant", "tool"]);
+    expect(roles).toEqual(["user", "assistant", "assistant", "assistant", "tool"]);
+    const thinking = s.messages.find((m) => m.thinking);
+    expect(thinking?.role).toBe("assistant");
+    expect(thinking?.content).toBe("");
+    expect(thinking?.thinking).toContain("reading the entry file");
+    // redacted_thinking blocks produce no message
+    expect(s.messages.filter((m) => m.thinking)).toHaveLength(1);
     expect(s.rawMeta.sidechainMessages).toBe(1);
     expect(s.projectPath).toBe("/home/u/api");
     const editMsg = s.messages.find((m) => m.toolName === "Edit");

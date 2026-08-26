@@ -24,6 +24,7 @@ const base = {
   tokens: undefined,
   toolName: null,
   toolInput: null,
+  thinking: null,
 };
 
 describe("enrich", () => {

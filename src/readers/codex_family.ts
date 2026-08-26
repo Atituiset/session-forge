@@ -79,11 +79,24 @@ async function* scanRollout(
     if (pt === "message") {
       const role = p.role as string;
       if (role !== "user" && role !== "assistant" && role !== "system") continue;
-      const content = flattenContent(p.content);
+      const content = flattenContent(p.content).text;
       if (!content) continue;
       messages.push(
         makeMsg({ role: role === "assistant" ? "assistant" : role, content, timestamp: ts, model }),
       );
+    } else if (pt === "reasoning") {
+      // Encrypted reasoning without a summary carries no text and yields nothing.
+      const summary = Array.isArray(p.summary) ? p.summary : [];
+      const thinking = summary
+        .map((s) =>
+          s && typeof s === "object" ? String((s as Record<string, unknown>).text ?? "") : "",
+        )
+        .filter((t) => t.length > 0)
+        .join("\n")
+        .trim();
+      if (thinking) {
+        messages.push(makeMsg({ role: "assistant", content: "", thinking, timestamp: ts, model }));
+      }
     } else if (pt === "function_call" || pt === "custom_tool_call") {
       const name = typeof p.name === "string" ? p.name : "unknown";
       const rawArgs = (p.arguments ?? p.input) as unknown;
@@ -171,13 +184,24 @@ async function* scanKimi(
         const m = (row.message ?? {}) as Record<string, unknown>;
         const role = m.role as string;
         if (role !== "user" && role !== "assistant" && role !== "system") break;
-        const content = flattenContent(m.content);
+        const { text, thinking } = flattenContent(m.content);
         const calls = Array.isArray(m.toolCalls) ? m.toolCalls : [];
-        if (content) {
+        if (thinking) {
+          messages.push(
+            makeMsg({
+              role: "assistant",
+              content: "",
+              thinking,
+              timestamp: isoFromMsLocal(t),
+              model,
+            }),
+          );
+        }
+        if (text) {
           messages.push(
             makeMsg({
               role,
-              content,
+              content: text,
               timestamp: isoFromMsLocal(t),
               model,
             }),
@@ -269,9 +293,22 @@ async function* scanCodewhale(
     const m = rm as Record<string, unknown>;
     const role = m.role as string;
     if (role !== "user" && role !== "assistant" && role !== "tool" && role !== "system") continue;
-    const content = flattenContent(m.content);
-    if (content) {
-      messages.push(makeMsg({ role, content, timestamp: isoFromMsLocal(m.timestamp), model }));
+    const { text, thinking } = flattenContent(m.content);
+    if (thinking) {
+      messages.push(
+        makeMsg({
+          role: "assistant",
+          content: "",
+          thinking,
+          timestamp: isoFromMsLocal(m.timestamp),
+          model,
+        }),
+      );
+    }
+    if (text) {
+      messages.push(
+        makeMsg({ role, content: text, timestamp: isoFromMsLocal(m.timestamp), model }),
+      );
     }
     const calls = Array.isArray(m.tool_calls) ? m.tool_calls : [];
     for (const tc of calls) {
@@ -314,10 +351,11 @@ function callName(messages: NirMessage[], callId: unknown): string | null {
   return null;
 }
 
-function flattenContent(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
+function flattenContent(content: unknown): { text: string; thinking: string } {
+  if (typeof content === "string") return { text: content, thinking: "" };
+  if (!Array.isArray(content)) return { text: "", thinking: "" };
   const out: string[] = [];
+  const thoughts: string[] = [];
   for (const block of content) {
     if (typeof block === "string") {
       out.push(block);
@@ -326,9 +364,15 @@ function flattenContent(content: unknown): string {
       if (b.type === "text" && typeof b.text === "string") out.push(b.text);
       else if (b.type === "input_text" && typeof b.text === "string") out.push(b.text);
       else if (b.type === "output_text" && typeof b.text === "string") out.push(b.text);
+      else if (b.type === "thinking" && typeof b.thinking === "string") thoughts.push(b.thinking);
+      else if (b.type === "reasoning") {
+        const t =
+          typeof b.text === "string" ? b.text : typeof b.summary === "string" ? b.summary : "";
+        if (t) thoughts.push(t);
+      }
     }
   }
-  return out.join("\n").trim();
+  return { text: out.join("\n").trim(), thinking: thoughts.join("\n").trim() };
 }
 
 function isoFromMsLocal(ms: unknown): string | null {

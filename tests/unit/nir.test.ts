@@ -26,6 +26,7 @@ describe("nir schema", () => {
     expect(s.id).toBe("s1");
     expect(s.rawMeta).toEqual({});
     expect(s.messages[0]?.role).toBe("user");
+    expect(s.messages[0]?.thinking).toBeNull();
   });
 
   test("defaults token usage fields to zero", () => {

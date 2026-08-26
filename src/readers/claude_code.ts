@@ -82,6 +82,13 @@ async function* scanFile(
       const b = block as Record<string, unknown>;
       if (b.type === "text" && typeof b.text === "string") {
         if (b.text.trim()) messages.push(makeMsg({ role, content: b.text, timestamp: ts, model }));
+      } else if (b.type === "thinking" && typeof b.thinking === "string") {
+        // `redacted_thinking` blocks carry no usable text and are ignored.
+        if (b.thinking.trim()) {
+          messages.push(
+            makeMsg({ role: "assistant", content: "", thinking: b.thinking, timestamp: ts, model }),
+          );
+        }
       } else if (b.type === "tool_use") {
         messages.push(
           makeMsg({

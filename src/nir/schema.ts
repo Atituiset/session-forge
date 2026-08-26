@@ -16,6 +16,7 @@ export const nirMessageSchema = z.object({
   toolName: z.string().nullable(),
   toolInput: z.unknown(),
   model: z.string().nullable(),
+  thinking: z.string().nullable().default(null),
   tokens: nirTokenUsageSchema.optional(),
 });
 

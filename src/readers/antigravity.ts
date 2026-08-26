@@ -121,6 +121,8 @@ async function parseTranscript(
         );
         break;
       default:
+        // Thinking/reasoning rows (if any) are dropped here: the transcript
+        // format gives no concrete type name for them to match on.
         break;
     }
   }

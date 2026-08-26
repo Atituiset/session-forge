@@ -59,6 +59,7 @@ export function makeMsg(partial: Partial<NirMessage> & { role: NirMessage["role"
     toolName: partial.toolName ?? null,
     toolInput: partial.toolInput ?? null,
     model: partial.model ?? null,
+    thinking: partial.thinking ?? null,
   };
 }
 

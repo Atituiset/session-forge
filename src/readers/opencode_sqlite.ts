@@ -143,6 +143,19 @@ function* scanDb(db: Database, file: string, toolId: string): Generator<ScanEven
               }),
             );
           }
+        } else if (pt === "reasoning" && typeof pd.text === "string") {
+          const thinking = pd.text.trim();
+          if (thinking) {
+            messages.push(
+              makeMsg({
+                role: role as NirMessage["role"],
+                content: "",
+                thinking,
+                timestamp: ts,
+                model: mModel,
+              }),
+            );
+          }
         } else if (pt === "patch" && Array.isArray(pd.files)) {
           for (const f of pd.files) {
             if (typeof f === "string") patchFiles.add(f);

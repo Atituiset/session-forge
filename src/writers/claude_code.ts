@@ -47,7 +47,9 @@ export function toClaudeCode(session: NirSession): ConvertReport {
     } else if (m.role === "assistant" && m.content) {
       converted++;
       const uuid = `forge-a-${counter}`;
-      const blocks: unknown[] = [{ type: "text", text: m.content }];
+      const blocks: unknown[] = [];
+      if (m.thinking) blocks.push({ type: "thinking", thinking: m.thinking });
+      blocks.push({ type: "text", text: m.content });
       if (m.model) {
         lines.push(
           mkRow(uuid, {
@@ -88,6 +90,7 @@ export function toClaudeCode(session: NirSession): ConvertReport {
           message: {
             role: "assistant",
             content: [
+              ...(m.thinking ? [{ type: "thinking", thinking: m.thinking }] : []),
               {
                 type: "tool_use",
                 id: toolUseId,
@@ -100,6 +103,20 @@ export function toClaudeCode(session: NirSession): ConvertReport {
       );
       parentUuid = uuid;
       uuids.set(counter, toolUseId);
+    } else if (m.role === "assistant" && m.thinking) {
+      converted++;
+      const uuid = `forge-a-${counter}`;
+      const content = [{ type: "thinking", thinking: m.thinking }];
+      lines.push(
+        mkRow(uuid, {
+          type: "assistant",
+          timestamp: when,
+          message: m.model
+            ? { role: "assistant", model: m.model, content }
+            : { role: "assistant", content },
+        }),
+      );
+      parentUuid = uuid;
     } else if (m.role === "tool") {
       converted++;
       const toolUseId = `forge-tu-${counter - 1}`;

@@ -73,6 +73,12 @@ function seedOpencodeDb(): void {
     "ses_1",
     JSON.stringify({ type: "patch", hash: "h", files: ["/home/u/mono/a.py", "/home/u/mono/b.py"] }),
   );
+  db.prepare("INSERT INTO part (id, message_id, session_id, data) VALUES (?,?,?,?)").run(
+    "pt4",
+    "m2",
+    "ses_1",
+    JSON.stringify({ type: "reasoning", text: "The file only needs a small edit." }),
+  );
   db.close();
 }
 
@@ -117,6 +123,10 @@ describe("opencode reader", () => {
     expect(userMsg?.content).toBe("please fix");
     const toolMsg = s.messages.find((m) => m.toolName === "edit");
     expect(toolMsg?.toolInput).toEqual({ filePath: "/home/u/mono/a.py" });
+    const thinking = s.messages.find((m) => m.thinking);
+    expect(thinking?.role).toBe("assistant");
+    expect(thinking?.content).toBe("");
+    expect(thinking?.thinking).toBe("The file only needs a small edit.");
     const assistant = s.messages.filter((m) => m.role === "assistant").at(-1);
     void assistant;
     const withTokens = s.messages.find((m) => m.tokens);
@@ -155,6 +165,7 @@ describe("store", () => {
           toolName: null,
           toolInput: null,
           model: null,
+          thinking: null,
         },
       ],
       rawMeta: {},
@@ -184,6 +195,7 @@ describe("store", () => {
           toolName: null,
           toolInput: null,
           model: null,
+          thinking: null,
         },
       ],
       rawMeta: {},
