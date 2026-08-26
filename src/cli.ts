@@ -563,6 +563,11 @@ function corsHeaders(origin: string | null): Record<string, string> {
     vary: "origin",
     "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
     "access-control-allow-headers": "content-type",
+    // Chromium (WebView2 on Windows) treats http://tauri.localhost →
+    // http://127.0.0.1 as a Private Network Access request and blocks it
+    // unless the preflight opts in with this header. WebKit (macOS/Linux)
+    // does not enforce PNA, which is why the panel only breaks on Windows.
+    "access-control-allow-private-network": "true",
   };
 }
 
