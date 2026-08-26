@@ -321,18 +321,38 @@ const isTauri = typeof window.__TAURI_INTERNALS__ !== "undefined";
 let engineOnline = false;
 
 /* ── 窗口控制：最小化 / 放大 / X=最小化到托盘 ── */
+// Tauri v2: the withGlobalTauri bundle (window.__TAURI__) can fail to inject
+// on some WebView2 setups, leaving every titlebar button dead. Bind through
+// __TAURI_INTERNALS__.invoke (always present inside the webview) and fall
+// back to the global API only if internals is missing.
+function tauriWindowInvoke(cmd) {
+  const internals = window.__TAURI_INTERNALS__;
+  if (internals?.invoke) {
+    // Tauri v2 core window plugin commands are namespaced plugin:window|<cmd>.
+    return () => internals.invoke(`plugin:window|${cmd}`, { label: "main" });
+  }
+  const api = window.__TAURI__?.window?.getCurrentWindow?.();
+  if (!api) return null;
+  const map = { minimize: () => api.minimize(), toggle_maximize: () => api.toggleMaximize(), hide: () => api.hide() };
+  return map[cmd] ?? null;
+}
+
 if (isTauri) {
-  try {
-    const w = window.__TAURI__.window.getCurrentWindow();
-    $("btn-min").onclick = () => w.minimize();
-    $("btn-max").onclick = () => w.toggleMaximize();
-    $("btn-close").onclick = () => w.hide();
-  } catch (err) {
-    console.error("window controls unavailable:", err);
+  const minFn = tauriWindowInvoke("minimize");
+  const maxFn = tauriWindowInvoke("toggle_maximize");
+  const hideFn = tauriWindowInvoke("hide");
+  if (minFn && maxFn && hideFn) {
+    $("btn-min").onclick = minFn;
+    $("btn-max").onclick = maxFn;
+    $("btn-close").onclick = hideFn;
+  } else {
+    console.error("window controls unavailable: no tauri IPC bridge");
+    document.querySelector(".winbtns").style.display = "none";
   }
 } else {
   document.querySelector(".winbtns").style.display = "none";
 }
+
 
 function setPill(ok, text) {
   engineOnline = ok;
@@ -435,29 +455,47 @@ function renderDonut(models) {
      </svg><div class="legend">${legend}</div>`;
 }
 
-/* ── 本地扫描：实时耗时反馈 ── */
+/* ── 本地扫描：POST 是异步 job（202），轮询 /api/scan/status 直到完成 ── */
 let scanTimer = null;
+async function pollScanDone(btn) {
+  const t0 = Date.now();
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 800));
+    let st;
+    try {
+      st = await (await fetch(`${API}/api/scan/status`, { signal: AbortSignal.timeout(3000) })).json();
+    } catch {
+      continue;
+    }
+    $("toast-msg").textContent = `正在扫描本机 Agent… ${(Date.now() - t0) / 1000 | 0}s`;
+    if (st.status !== "running") return st;
+  }
+}
+
 async function runScan() {
   if (!engineOnline) return;
   const btn = $("btn-scan");
   btn.disabled = true;
   $("toast").classList.add("show");
   $("toast-spin").style.display = "block";
-  const t0 = Date.now();
-  scanTimer = setInterval(() => {
-    $("toast-msg").textContent = `正在扫描本机 Agent… ${(Date.now() - t0) / 1000 | 0}s`;
-  }, 300);
   try {
     const res = await fetch(`${API}/api/scan`, { method: "POST" });
-    const j = await res.json();
-    clearInterval(scanTimer);
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      $("toast-spin").style.display = "none";
+      $("toast-msg").textContent =
+        res.status === 409 ? "已有扫描在进行中…" : `触发扫描失败：${j.error ?? res.status}`;
+      return;
+    }
+    // 202 {status:"started"} — poll until the job finishes.
+    const done = await pollScanDone(btn);
     $("toast-spin").style.display = "none";
-    $("toast-msg").textContent = res.ok && j.status === "ok"
-      ? `扫描完成 · ${j.summary.tools.filter((t) => t.sessions > 0).length} 个数据源 · 共 ${j.summary.tools.reduce((s, t) => s + t.sessions, 0)} 会话`
-      : `扫描失败：${j.error ?? "未知错误"}`;
+    const sum = done?.summary;
+    $("toast-msg").textContent = done?.status === "ok" && sum
+      ? `扫描完成 · ${(sum.durationMs / 1000).toFixed(1)}s · ${sum.tools.filter((t) => t.sessions > 0).length} 个数据源 · 共 ${sum.tools.reduce((s2, t) => s2 + t.sessions, 0)} 会话`
+      : `扫描失败：${done?.error ?? "未知错误"}`;
     await loadData();
   } catch (e) {
-    clearInterval(scanTimer);
     $("toast-spin").style.display = "none";
     $("toast-msg").textContent = "引擎未响应，请重启应用";
   } finally {
@@ -549,7 +587,14 @@ $("btn-scan").onclick = runScan;
 $("btn-export").onclick = () => window.open(`${API}/api/data`, "_blank");
 
 if (isTauri) {
-  window.__TAURI__.event.listen("trigger-scan", () => runScan());
+  const internals = window.__TAURI_INTERNALS__;
+  const listen = internals?.invoke && internals?.transformCallback
+    ? (event, cb) => {
+        const handler = internals.transformCallback((e) => cb(e.payload ?? e));
+        return internals.invoke("plugin:event|listen", { event, target: { kind: "Any" }, handler }).then(() => {});
+      }
+    : window.__TAURI__?.event.listen;
+  listen?.("trigger-scan", () => runScan());
 }
 
 (async function boot() {
@@ -557,6 +602,14 @@ if (isTauri) {
   if (online) {
     loadData().catch(() => {});
     loadRemotes();
+    // First launch (or empty db): kick off an automatic scan so the panel
+    // is never a wall of empty cards.
+    try {
+      const d = await (await fetch(`${API}/api/data`, { signal: AbortSignal.timeout(5000) })).json();
+      if ((d.totals?.sessions ?? 0) === 0) {
+        runScan();
+      }
+    } catch {}
   }
 })();
 setInterval(checkEngine, 5000);
