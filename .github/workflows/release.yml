@@ -153,6 +153,26 @@ jobs:
           Wait-Healthy
           Write-Host "relaunch healthy"
 
+          Write-Host "== upgrade path: pre-0.1.4 schema db must migrate, not crash =="
+          Stop-Process -Name $engineProcName -Force -ErrorAction SilentlyContinue
+          Stop-Process -Name $main.BaseName -Force -ErrorAction SilentlyContinue
+          Start-Sleep 2
+          $sfHome = "$env:USERPROFILE\.session-forge"
+          New-Item -ItemType Directory -Force -Path $sfHome | Out-Null
+          # Schema as v0.1.4 created it: no tags/token_source/has_error columns.
+          $legacySql = "CREATE TABLE IF NOT EXISTS sessions (source TEXT NOT NULL, id TEXT NOT NULL, rev INTEGER NOT NULL DEFAULT 0, project_path TEXT, started_at TEXT, ended_at TEXT, model TEXT, tokens_in INTEGER NOT NULL DEFAULT 0, tokens_out INTEGER NOT NULL DEFAULT 0, cost REAL, rounds INTEGER NOT NULL DEFAULT 0, files_json TEXT NOT NULL DEFAULT '[]', additions INTEGER NOT NULL DEFAULT 0, deletions INTEGER NOT NULL DEFAULT 0, raw TEXT NOT NULL, scanned_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (source, id)); INSERT OR REPLACE INTO sessions (source, id, rev, project_path, raw) VALUES ('claude-code', 'legacy-smoke-session', 1, 'C:/tmp', '{""id"":""legacy-smoke-session"",""source"":""claude-code"",""sourceVersion"":null,""projectPath"":null,""startedAt"":null,""endedAt"":null,""messages"":[],""rawMeta"":{}}');"
+          Set-Content -Path "$env:TEMP\legacy-schema.sql" -Value $legacySql -Encoding utf8
+          $seedTs = 'import { Database } from "bun:sqlite"; const db = new Database(process.argv[2], { create: true }); db.exec(require("fs").readFileSync(process.argv[3], "utf8")); db.close(); console.log("legacy db seeded");'
+          Set-Content -Path "$env:TEMP\seed-legacy.ts" -Value $seedTs -Encoding utf8
+          bun run "$env:TEMP\seed-legacy.ts" "$sfHome\cache.db" "$env:TEMP\legacy-schema.sql"
+          if (-not (Test-Path "$sfHome\cache.db")) { throw "legacy db seeding failed" }
+
+          Start-Process $main.FullName
+          Wait-Healthy
+          $data = Invoke-RestMethod "http://127.0.0.1:4177/api/data" -TimeoutSec 10
+          if ($data.totals.sessions -lt 1) { throw "legacy session not visible after migration" }
+          Write-Host "upgrade-path PASSED (legacy db migrated, engine healthy)"
+
           Write-Host "== uninstall (validates PREUNINSTALL taskkill hook) =="
           $unins = Get-ChildItem $dir -Filter "unins*.exe" | Select-Object -First 1
           Start-Process $unins.FullName -ArgumentList "/S" -Wait

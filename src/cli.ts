@@ -21,6 +21,7 @@ import type { SessionSummary } from "./store.ts";
 import { defaultStorePath, Store } from "./store.ts";
 import { LocalTransport } from "./transport/local.ts";
 import { SshTransport } from "./transport/ssh.ts";
+import { SshLibTransport } from "./transport/ssh_lib.ts";
 import type { Transport } from "./transport/types.ts";
 import { toClaudeCode } from "./writers/claude_code.ts";
 import { toCodexRollout } from "./writers/codex_rollout.ts";
@@ -351,6 +352,12 @@ program
     }
     let localJob: ScanJob | null = null;
     const remoteJobs = new Map<string, ScanJob>();
+    // Session-only password cache; never written to disk.
+    const remotePasswords = new Map<string, string>();
+    const setRemotePassword = (name: string, pw?: string): void => {
+      if (pw) remotePasswords.set(name, pw);
+      else remotePasswords.delete(name);
+    };
 
     // Drop finished remote job entries older than an hour so the map cannot
     // grow without bound over a long-lived server.
@@ -409,13 +416,21 @@ program
           pruneFinishedJobs();
           return Response.json({
             remotes: loadRemotes().map((r) => ({
-              ...r,
+              name: r.name,
+              host: r.host,
+              username: r.username,
+              hasPassword: remotePasswords.has(r.name),
+              addedAt: r.addedAt,
               job: remoteJobs.get(r.name) ?? null,
             })),
           });
         }
         if (req.method === "POST") {
-          const body = (await req.json()) as { name?: string };
+          const body = (await req.json()) as {
+            name?: string;
+            username?: string;
+            password?: string;
+          };
           const name = body.name?.trim();
           if (!name || !/^[A-Za-z0-9_.@-]+$/.test(name)) {
             return Response.json(
@@ -423,10 +438,25 @@ program
               { status: 400 },
             );
           }
+          // Parse user@host form into explicit fields.
+          let host = name;
+          let username = body.username?.trim() || undefined;
+          const at = host.lastIndexOf("@");
+          if (at > 0) {
+            username = username ?? host.slice(0, at);
+            host = host.slice(at + 1);
+          }
           const remotes = loadRemotes();
-          if (!remotes.some((r) => r.name === name)) {
-            remotes.push({ name, addedAt: Date.now() });
+          const existing = remotes.find((r) => r.name === name);
+          if (existing) {
+            existing.username = username;
+            existing.host = host;
             saveRemotes(remotes);
+            setRemotePassword(name, body.password);
+          } else {
+            remotes.push({ name, host, username, addedAt: Date.now() });
+            saveRemotes(remotes);
+            setRemotePassword(name, body.password);
           }
           return Response.json({ ok: true });
         }
@@ -451,7 +481,16 @@ program
           void (async () => {
             const started = remoteJobs.get(name);
             try {
-              const sshTransport = new SshTransport(name);
+              const remote = loadRemotes().find((r) => r.name === name);
+              const pw = remotePasswords.get(name);
+              const sshTransport =
+                pw && remote?.host
+                  ? new SshLibTransport({
+                      host: remote.host,
+                      username: remote.username,
+                      password: pw,
+                    })
+                  : new SshTransport(name);
               const summary = await discoverAndIngest(sshTransport, store);
               if (started?.status === "running") {
                 remoteJobs.set(name, {
@@ -543,17 +582,34 @@ function remotesPath(): string {
   return path.join(path.dirname(defaultStorePath()), "remotes.json");
 }
 
-function loadRemotes(): { name: string; addedAt: number }[] {
+export interface RemoteEntry {
+  name: string; // display name / ssh host (may be user@host)
+  host: string;
+  username?: string;
+  /** Only kept in-memory for the running server; never persisted to disk. */
+  password?: string;
+  addedAt: number;
+}
+
+function loadRemotes(): RemoteEntry[] {
   try {
-    return JSON.parse(readFileSync(remotesPath(), "utf8")) as { name: string; addedAt: number }[];
+    return JSON.parse(readFileSync(remotesPath(), "utf8")) as RemoteEntry[];
   } catch {
     return [];
   }
 }
 
-function saveRemotes(remotes: { name: string; addedAt: number }[]): void {
+function saveRemotes(remotes: RemoteEntry[]): void {
   mkdirSync(path.dirname(remotesPath()), { recursive: true });
-  writeFileSync(remotesPath(), JSON.stringify(remotes, null, 2));
+  // Strip passwords — credentials must not hit the disk.
+  writeFileSync(
+    remotesPath(),
+    JSON.stringify(
+      remotes.map(({ password: _pw, ...rest }) => rest),
+      null,
+      2,
+    ),
+  );
 }
 
 function buildDashboardData(store: Store): Record<string, unknown> {
