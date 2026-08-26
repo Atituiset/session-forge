@@ -44,6 +44,20 @@ export class Store {
       CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_path);
       CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
     `);
+    // Migrations MUST run before any prepared statements reference the new
+    // columns — databases created before these columns existed would crash
+    // the engine at startup otherwise (seen in the wild on 0.1.4 → 0.1.6).
+    for (const ddl of [
+      "ALTER TABLE sessions ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'",
+      "ALTER TABLE sessions ADD COLUMN token_source TEXT NOT NULL DEFAULT 'none'",
+      "ALTER TABLE sessions ADD COLUMN has_error INTEGER NOT NULL DEFAULT 0",
+    ]) {
+      try {
+        this.db.exec(ddl);
+      } catch {
+        // column already exists
+      }
+    }
     this.upsertStmt = this.db.prepare(
       `INSERT INTO sessions (source, id, rev, project_path, started_at, ended_at, model,
          tokens_in, tokens_out, token_source, cost, rounds, files_json, additions,
@@ -60,18 +74,6 @@ export class Store {
        WHERE sessions.rev < excluded.rev`,
     );
     this.getRevStmt = this.db.prepare("SELECT rev FROM sessions WHERE source = ? AND id = ?");
-    // Migrations for databases created before these columns existed.
-    for (const ddl of [
-      "ALTER TABLE sessions ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'",
-      "ALTER TABLE sessions ADD COLUMN token_source TEXT NOT NULL DEFAULT 'none'",
-      "ALTER TABLE sessions ADD COLUMN has_error INTEGER NOT NULL DEFAULT 0",
-    ]) {
-      try {
-        this.db.exec(ddl);
-      } catch {
-        // column already exists
-      }
-    }
   }
 
   transaction<T>(fn: () => T): T {
