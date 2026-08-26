@@ -120,7 +120,11 @@ export function toCodexRollout(session: NirSession): ConvertReport {
     }
   }
 
-  const relPath = `sessions/${start.getFullYear()}/${String(start.getMonth() + 1).padStart(2, "0")}/${String(start.getDate()).padStart(2, "0")}/rollout-${start.toISOString().replace(/[:.]/g, "-").slice(0, 19)}-${session.id}.jsonl`;
+  // Session ids can be arbitrary (some readers fall back to the source file
+  // path) — sanitize before embedding into the output file name, otherwise
+  // Windows-illegal chars (`:`, `\`) sneak in or fake subdirs appear.
+  const safeId = session.id.replace(/[^A-Za-z0-9_.-]/g, "_").slice(-80);
+  const relPath = `sessions/${start.getFullYear()}/${String(start.getMonth() + 1).padStart(2, "0")}/${String(start.getDate()).padStart(2, "0")}/rollout-${start.toISOString().replace(/[:.]/g, "-").slice(0, 19)}-${safeId}.jsonl`;
 
   return {
     files: [{ path: relPath, content: `${lines.join("\n")}\n` }],

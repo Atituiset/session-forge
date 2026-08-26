@@ -137,8 +137,10 @@ export function toClaudeCode(session: NirSession): ConvertReport {
     }
   }
 
+  // Same sanitize as the codex writer: ids may contain path characters.
+  const safeId = session.id.replace(/[^A-Za-z0-9_.-]/g, "_").slice(-80);
   return {
-    files: [{ path: `projects/${slug}/${session.id}.jsonl`, content: `${lines.join("\n")}\n` }],
+    files: [{ path: `projects/${slug}/${safeId}.jsonl`, content: `${lines.join("\n")}\n` }],
     fidelity: "L2",
     messagesConverted: converted,
     toolsMapped,

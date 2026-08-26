@@ -30,7 +30,10 @@ Host !blocked *.corp
 Host web1 web2
     HostName 10.0.0.5
 `);
-    expect(hosts).toEqual([{ name: "web1", host: "10.0.0.5" }, { name: "web2", host: "10.0.0.5" }]);
+    expect(hosts).toEqual([
+      { name: "web1", host: "10.0.0.5" },
+      { name: "web2", host: "10.0.0.5" },
+    ]);
   });
 
   test("strips comments and is case-insensitive on keywords", () => {
@@ -62,7 +65,10 @@ describe("filterNewHosts", () => {
   ];
 
   test("skips names already tracked", () => {
-    const fresh = filterNewHosts([{ name: "dev", host: "192.168.1.20", username: "deploy" }], parsed);
+    const fresh = filterNewHosts(
+      [{ name: "dev", host: "192.168.1.20", username: "deploy" }],
+      parsed,
+    );
     expect(fresh.map((h) => h.name)).toEqual(["new"]);
   });
 
