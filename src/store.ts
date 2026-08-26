@@ -29,11 +29,13 @@ export class Store {
         model TEXT,
         tokens_in INTEGER NOT NULL DEFAULT 0,
         tokens_out INTEGER NOT NULL DEFAULT 0,
+        token_source TEXT NOT NULL DEFAULT 'none',
         cost REAL,
         rounds INTEGER NOT NULL DEFAULT 0,
         files_json TEXT NOT NULL DEFAULT '[]',
         additions INTEGER NOT NULL DEFAULT 0,
         deletions INTEGER NOT NULL DEFAULT 0,
+        has_error INTEGER NOT NULL DEFAULT 0,
         raw TEXT NOT NULL,
         scanned_at INTEGER NOT NULL DEFAULT 0,
         tags TEXT NOT NULL DEFAULT '[]',
@@ -44,20 +46,31 @@ export class Store {
     `);
     this.upsertStmt = this.db.prepare(
       `INSERT INTO sessions (source, id, rev, project_path, started_at, ended_at, model,
-         tokens_in, tokens_out, cost, rounds, files_json, additions, deletions, raw, scanned_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         tokens_in, tokens_out, token_source, cost, rounds, files_json, additions,
+         deletions, has_error, raw, scanned_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(source, id) DO UPDATE SET
          rev=excluded.rev, project_path=excluded.project_path, started_at=excluded.started_at,
          ended_at=excluded.ended_at, model=excluded.model, tokens_in=excluded.tokens_in,
-         tokens_out=excluded.tokens_out, cost=excluded.cost, rounds=excluded.rounds,
+         tokens_out=excluded.tokens_out, token_source=excluded.token_source,
+         cost=excluded.cost, rounds=excluded.rounds,
          files_json=excluded.files_json, additions=excluded.additions,
-         deletions=excluded.deletions, raw=excluded.raw, scanned_at=excluded.scanned_at`,
+         deletions=excluded.deletions, has_error=excluded.has_error,
+         raw=excluded.raw, scanned_at=excluded.scanned_at
+       WHERE sessions.rev < excluded.rev`,
     );
     this.getRevStmt = this.db.prepare("SELECT rev FROM sessions WHERE source = ? AND id = ?");
-    try {
-      this.db.exec("ALTER TABLE sessions ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'");
-    } catch {
-      // column already exists
+    // Migrations for databases created before these columns existed.
+    for (const ddl of [
+      "ALTER TABLE sessions ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'",
+      "ALTER TABLE sessions ADD COLUMN token_source TEXT NOT NULL DEFAULT 'none'",
+      "ALTER TABLE sessions ADD COLUMN has_error INTEGER NOT NULL DEFAULT 0",
+    ]) {
+      try {
+        this.db.exec(ddl);
+      } catch {
+        // column already exists
+      }
     }
   }
 
@@ -87,11 +100,13 @@ export class Store {
       lastModel(session),
       stats.tokensIn,
       stats.tokensOut,
+      stats.tokenSource,
       typeof session.rawMeta.cost === "number" ? session.rawMeta.cost : null,
       stats.rounds,
       JSON.stringify(stats.filesTouched),
       stats.additions,
       stats.deletions,
+      stats.hasError ? 1 : 0,
       JSON.stringify(session),
       Date.now(),
     );
@@ -99,16 +114,22 @@ export class Store {
   }
 
   pruneOtherSessions(source: string, keepIds: Set<string>): number {
-    return this.transaction(() => {
-      const rows = this.db.prepare("SELECT id FROM sessions WHERE source = ?").all(source) as {
-        id: string;
-      }[];
-      const stale = rows.filter((r) => !keepIds.has(r.id)).map((r) => r.id);
-      if (stale.length === 0) return 0;
-      const del = this.db.prepare("DELETE FROM sessions WHERE source = ? AND id = ?");
-      for (const id of stale) del.run(source, id);
-      return stale.length;
+    const rows = this.db.prepare("SELECT id FROM sessions WHERE source = ?").all(source) as {
+      id: string;
+    }[];
+    const stale = rows.filter((r) => !keepIds.has(r.id)).map((r) => r.id);
+    if (stale.length === 0) return 0;
+    let deleted = 0;
+    this.transaction(() => {
+      const del = this.db.prepare(
+        `DELETE FROM sessions WHERE source = ? AND id IN (${stale.map(() => "?").join(",")})`,
+      );
+      // Chunk to stay well under SQLITE_MAX_VARIABLE_NUMBER.
+      for (let i = 0; i < stale.length; i += 500) {
+        deleted += del.run(source, ...stale.slice(i, i + 500)).changes;
+      }
     });
+    return deleted;
   }
 
   setTags(source: string, id: string, tags: string[]): void {
@@ -118,13 +139,22 @@ export class Store {
   }
 
   allSessions(): StoredSession[] {
+    return this.selectSessions("raw") as StoredSession[];
+  }
+
+  // Statistics-only variant: skips the potentially huge raw JSON column.
+  listSessions(): SessionSummary[] {
+    return this.selectSessions("NULL AS raw");
+  }
+
+  private selectSessions(rawExpr: string): SessionSummary[] {
     return this.db
       .prepare(
-        "SELECT source, id, project_path AS projectPath, started_at AS startedAt, ended_at AS endedAt," +
-          " model, tokens_in AS tokensIn, tokens_out AS tokensOut, cost, rounds," +
-          " files_json AS filesJson, additions, deletions, raw FROM sessions",
+        `SELECT source, id, project_path AS projectPath, started_at AS startedAt, ended_at AS endedAt,` +
+          ` model, tokens_in AS tokensIn, tokens_out AS tokensOut, token_source AS tokenSource, cost, rounds,` +
+          ` files_json AS filesJson, additions, deletions, has_error AS hasError, tags AS tagsJson, ${rawExpr} FROM sessions`,
       )
-      .all() as StoredSession[];
+      .all() as SessionSummary[];
   }
 
   getSession(source: string, id: string): NirSession | null {
@@ -150,7 +180,7 @@ export class Store {
   }
 }
 
-export interface StoredSession {
+export interface SessionSummary {
   source: string;
   id: string;
   projectPath: string | null;
@@ -159,11 +189,18 @@ export interface StoredSession {
   model: string | null;
   tokensIn: number;
   tokensOut: number;
+  tokenSource: "reported" | "estimated" | "none";
   cost: number | null;
   rounds: number;
   filesJson: string;
   additions: number;
   deletions: number;
+  hasError: number;
+  tagsJson: string;
+  raw: string | null;
+}
+
+export interface StoredSession extends SessionSummary {
   raw: string;
 }
 

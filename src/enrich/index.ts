@@ -1,4 +1,5 @@
 import type { NirMessage, NirSession } from "../nir/schema.ts";
+import { collectPatchFiles } from "../readers/util.ts";
 
 export interface EnrichedStats {
   rounds: number;
@@ -159,14 +160,6 @@ function collectPatchFilesFromMeta(session: NirSession, out: Set<string>): void 
     for (const f of patch) {
       if (typeof f === "string") out.add(f);
     }
-  }
-}
-
-function collectPatchFiles(patch: string, out: Set<string>): void {
-  const re = /\*\*\* (Update|Add|Delete) File: (.+)/g;
-  for (const m of patch.matchAll(re)) {
-    const name = m[2];
-    if (name) out.add(name.trim());
   }
 }
 

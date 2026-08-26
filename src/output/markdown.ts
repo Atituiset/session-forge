@@ -6,11 +6,11 @@ import {
   topFiles,
   totals,
 } from "../analytics/index.ts";
-import type { StoredSession } from "../store.ts";
+import type { SessionSummary } from "../store.ts";
 import { formatTokens } from "./format.ts";
 
 export function renderKnowledgeBase(
-  rows: StoredSession[],
+  rows: SessionSummary[],
   granularity: "day" | "week" | "month",
 ): string {
   const t = totals(rows);

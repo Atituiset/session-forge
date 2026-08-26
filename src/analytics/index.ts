@@ -1,4 +1,4 @@
-import type { StoredSession } from "../store.ts";
+import type { SessionSummary } from "../store.ts";
 
 export interface Totals {
   sessions: number;
@@ -28,7 +28,7 @@ export interface TimeAgg {
   additions: number;
 }
 
-export function totals(rows: StoredSession[]): Totals {
+export function totals(rows: SessionSummary[]): Totals {
   const t: Totals = {
     sessions: rows.length,
     projects: 0,
@@ -58,7 +58,7 @@ function normProject(p: string | null): string {
   return p.replace(/\/$/, "").split("/").pop() || p;
 }
 
-export function aggregateByProject(rows: StoredSession[], limit = 15): ProjectAgg[] {
+export function aggregateByProject(rows: SessionSummary[], limit = 15): ProjectAgg[] {
   const map = new Map<string, ProjectAgg>();
   for (const r of rows) {
     const key = `${normProject(r.projectPath)}\t${r.source}`;
@@ -85,7 +85,7 @@ export function aggregateByProject(rows: StoredSession[], limit = 15): ProjectAg
 }
 
 export function aggregateByTime(
-  rows: StoredSession[],
+  rows: SessionSummary[],
   granularity: "day" | "week" | "month",
   limit = 30,
 ): TimeAgg[] {
@@ -112,7 +112,7 @@ export function aggregateByTime(
   return [...map.values()].sort((a, b) => a.bucket.localeCompare(b.bucket)).slice(-limit);
 }
 
-export function topFiles(rows: StoredSession[], limit = 10): { file: string; count: number }[] {
+export function topFiles(rows: SessionSummary[], limit = 10): { file: string; count: number }[] {
   const counts = new Map<string, number>();
   for (const r of rows) {
     let files: string[];
@@ -131,12 +131,12 @@ export function topFiles(rows: StoredSession[], limit = 10): { file: string; cou
     .map(([file, count]) => ({ file, count }));
 }
 
-export function blackholes(rows: StoredSession[], threshold: number): StoredSession[] {
+export function blackholes(rows: SessionSummary[], threshold: number): SessionSummary[] {
   return rows.filter((r) => r.rounds >= threshold).sort((a, b) => b.rounds - a.rounds);
 }
 
 export function byModel(
-  rows: StoredSession[],
+  rows: SessionSummary[],
 ): { model: string; sessions: number; tokensIn: number }[] {
   const map = new Map<string, { model: string; sessions: number; tokensIn: number }>();
   for (const r of rows) {

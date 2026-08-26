@@ -138,10 +138,20 @@ async function* scanFile(
   yield { kind: "session", sourceFile: file, rev, session };
 }
 
+// Claude Code encodes the project dir as a flat slug (`-home-me-my-project`).
+// Dashes are ambiguous (path separators vs. hyphens in names like `my-app`),
+// so only split on dashes that follow known root prefixes; otherwise leave the
+// project path null rather than guess a mangled path.
 function decodeProjectSlug(file: string): string | null {
   const dir = file.split("/").slice(0, -1).pop();
   if (!dir?.startsWith("-")) return null;
-  return `/${dir.slice(1).replace(/-/g, "/")}`;
+  const slug = dir.slice(1);
+  for (const prefix of ["home-", "Users-", "mnt-c-Users-"]) {
+    if (slug.startsWith(prefix)) {
+      return `/${slug.slice(prefix.length).replace(/-/g, "/")}`;
+    }
+  }
+  return null;
 }
 
 function num(v: unknown): number {

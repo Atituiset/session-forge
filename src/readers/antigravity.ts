@@ -136,15 +136,16 @@ async function parseTranscript(
   return { kind: "session", sourceFile: file, rev, session };
 }
 
-// Stable change-detection value: mtime for local files, wall clock only as a
-// last resort (remote stat is not uniformly available). Avoids rewriting every
-// session's raw JSON on each scan.
+// Stable change-detection value: mtime for local files. On stat failure return
+// Date.now() rather than 0 — a forced refresh is safer than a permanent skip
+// (rev 0 would pin the session as "unchanged" forever after its first insert).
 export async function stableRev(transport: Transport, file: string): Promise<number> {
   if (transport.kind === "local") {
     try {
-      return (await Bun.file(file).lastModified) || 0;
+      const mtime = await Bun.file(file).lastModified;
+      return mtime || Date.now();
     } catch {
-      return 0;
+      return Date.now();
     }
   }
   try {
@@ -154,7 +155,7 @@ export async function stableRev(transport: Transport, file: string): Promise<num
       if (r.exitCode === 0 && Number.isFinite(mtime)) return mtime * 1000;
     }
   } catch {}
-  return 0;
+  return Date.now();
 }
 
 function extractString(row: Record<string, unknown>, key: string): string {

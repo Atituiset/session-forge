@@ -29,5 +29,8 @@ export interface Transport {
   readBinaryFile(filePath: string): Promise<Uint8Array>;
   listDir(dirPath: string): Promise<DirEntry[] | null>;
   glob(pattern: string): Promise<string[]>;
+  // Optional batched variant so remote transports can merge several patterns
+  // into a single round trip.
+  globMany?(patterns: string[]): Promise<string[][]>;
   exec?(argv: string[]): Promise<ExecResult>;
 }

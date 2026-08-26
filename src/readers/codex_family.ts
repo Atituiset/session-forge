@@ -4,6 +4,7 @@ import { stableRev } from "./antigravity.ts";
 import type { FileGroup, Reader, ScanEvent } from "./util.ts";
 import {
   buildSession,
+  collectPatchFiles,
   estTokens,
   extractTokens,
   makeMsg,
@@ -297,14 +298,6 @@ async function* scanCodewhale(
   const session = buildSession({ id, source: toolId, projectPath, messages });
   const rev = await revFor(transport, file);
   yield { kind: "session", sourceFile: file, rev, session };
-}
-
-function collectPatchFiles(patch: string, out: Set<string>): void {
-  const re = /\*\*\* (Update|Add|Delete) File: (.+)/g;
-  for (const m of patch.matchAll(re)) {
-    const name = m[2];
-    if (name) out.add(name.trim());
-  }
 }
 
 function callName(messages: NirMessage[], callId: unknown): string | null {

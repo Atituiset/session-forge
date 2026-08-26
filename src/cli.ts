@@ -17,10 +17,11 @@ import { llmClassify, ruleClassify } from "./llm_enrich/intent.ts";
 import { formatTokens, shortPath } from "./output/format.ts";
 import { renderKnowledgeBase } from "./output/markdown.ts";
 import { bar, renderTable } from "./output/terminal.ts";
-import type { StoredSession } from "./store.ts";
+import type { SessionSummary } from "./store.ts";
 import { defaultStorePath, Store } from "./store.ts";
 import { LocalTransport } from "./transport/local.ts";
 import { SshTransport } from "./transport/ssh.ts";
+import type { Transport } from "./transport/types.ts";
 import { toClaudeCode } from "./writers/claude_code.ts";
 import { toCodexRollout } from "./writers/codex_rollout.ts";
 import { renderHandoff } from "./writers/handoff_md.ts";
@@ -82,7 +83,7 @@ program
   .action(async (opts: { db: string; project?: string; granularity: string }) => {
     const store = new Store(opts.db);
     try {
-      let rows = store.allSessions();
+      let rows = store.listSessions();
       const filter = opts.project;
       if (filter) {
         rows = rows.filter((r) => (r.projectPath ?? "").includes(filter));
@@ -107,7 +108,7 @@ program
     }
     const store = new Store(opts.db);
     try {
-      const rows = blackholes(store.allSessions(), threshold);
+      const rows = blackholes(store.listSessions(), threshold);
       if (rows.length === 0) {
         console.log(`No sessions with >= ${threshold} rounds.`);
         return;
@@ -120,6 +121,7 @@ program
             { header: "project" },
             { header: "rounds", align: "right" },
             { header: "tokens_in", align: "right" },
+            { header: "tokens_src" },
             { header: "errors" },
           ],
           rows
@@ -130,7 +132,12 @@ program
               shortPath(r.projectPath),
               String(r.rounds),
               formatTokens(r.tokensIn),
-              "⚠",
+              r.tokenSource === "reported"
+                ? "reported"
+                : r.tokenSource === "estimated"
+                  ? "est"
+                  : "-",
+              r.hasError ? "⚠" : "",
             ]),
         ),
       );
@@ -148,9 +155,15 @@ program
   .option("--out <path>", "output file path")
   .option("--granularity <unit>", "day | week | month", "day")
   .action(async (opts: { db: string; format: string; out?: string; granularity: string }) => {
+    const granularity = opts.granularity as "day" | "week" | "month";
+    if (granularity !== "day" && granularity !== "week" && granularity !== "month") {
+      console.error(`Invalid --granularity: ${opts.granularity} (expected day | week | month).`);
+      process.exitCode = 1;
+      return;
+    }
     const store = new Store(opts.db);
     try {
-      const rows = store.allSessions();
+      const rows = store.listSessions();
       if (rows.length === 0) {
         console.log("No sessions indexed yet. Run `session-forge scan` first.");
         return;
@@ -167,7 +180,7 @@ program
         return;
       }
       const out = opts.out ?? "AI_DEV_HISTORY.md";
-      await Bun.write(out, renderKnowledgeBase(rows, opts.granularity as "day" | "week" | "month"));
+      await Bun.write(out, renderKnowledgeBase(rows, granularity));
       console.log(`Knowledge base written to ${out}`);
     } finally {
       store.close();
@@ -180,47 +193,96 @@ program
   .option("--db <path>", "cache database path", defaultStorePath())
   .option("--llm", "force LLM classification (requires ANTHROPIC_API_KEY)")
   .option("--limit <n>", "max sessions to classify", "500")
-  .action(async (opts: { db: string; llm?: boolean; limit: string }) => {
-    const store = new Store(opts.db);
-    try {
-      const rows = store.allSessions();
-      const apiKey = process.env.ANTHROPIC_API_KEY;
-      const useLlm = opts.llm === true && Boolean(apiKey);
-      if (opts.llm && !apiKey) {
-        console.error("ANTHROPIC_API_KEY not set, falling back to rule engine.");
-      }
+  .option("--concurrency <n>", "parallel LLM requests", "4")
+  .option("--force", "re-classify sessions that already have tags")
+  .action(
+    async (opts: {
+      db: string;
+      llm?: boolean;
+      limit: string;
+      concurrency: string;
+      force?: boolean;
+    }) => {
       const limit = Number.parseInt(opts.limit, 10);
-      let done = 0;
-      let llmOk = 0;
-      const counts = new Map<string, number>();
-      for (const row of rows.slice(0, limit)) {
-        const session = JSON.parse(row.raw) as import("./nir/schema.ts").NirSession;
-        const goal =
-          session.messages.find((m) => m.role === "user" && m.content.trim().length > 0)?.content ??
-          "";
-        let tag: IntentTag = ruleClassify(goal);
-        if (useLlm) {
-          try {
-            tag = await llmClassify(goal, { apiKey: apiKey as string });
-            llmOk++;
-          } catch {
-            // keep the rule-engine tag on LLM failure
-          }
+      if (!Number.isFinite(limit) || limit < 1) {
+        console.error(`Invalid --limit: ${opts.limit} (expected integer >= 1).`);
+        process.exitCode = 1;
+        return;
+      }
+      const concurrency = Number.parseInt(opts.concurrency, 10);
+      if (!Number.isFinite(concurrency) || concurrency < 1 || concurrency > 32) {
+        console.error(`Invalid --concurrency: ${opts.concurrency} (expected integer in [1, 32]).`);
+        process.exitCode = 1;
+        return;
+      }
+      const store = new Store(opts.db);
+      try {
+        const apiKey = process.env.ANTHROPIC_API_KEY;
+        const useLlm = opts.llm === true && Boolean(apiKey);
+        if (opts.llm && !apiKey) {
+          console.error("ANTHROPIC_API_KEY not set, falling back to rule engine.");
         }
-        store.setTags(row.source, row.id, [tag]);
-        counts.set(tag, (counts.get(tag) ?? 0) + 1);
-        done++;
+        const pending = store
+          .listSessions()
+          .filter((r) => opts.force || safeParseTags(r.tagsJson ?? "[]").length === 0)
+          .slice(0, limit);
+        if (pending.length === 0) {
+          console.log("Nothing to classify (all sessions already tagged; use --force to redo).");
+          return;
+        }
+
+        let done = 0;
+        let llmOk = 0;
+        const counts = new Map<string, number>();
+        const classifyRow = async (row: SessionSummary): Promise<void> => {
+          let goal = "";
+          try {
+            // listSessions() does not carry the raw column — load it per row.
+            const session = store.getSession(row.source, row.id);
+            if (!session) return;
+            goal =
+              session.messages.find((m) => m.role === "user" && m.content.trim().length > 0)
+                ?.content ?? "";
+          } catch {
+            return; // unreadable raw — leave untagged
+          }
+          let tag: IntentTag = ruleClassify(goal);
+          if (useLlm) {
+            try {
+              tag = await llmClassify(goal, { apiKey: apiKey as string });
+              llmOk++;
+            } catch {
+              // keep the rule-engine tag on LLM failure
+            }
+          }
+          store.setTags(row.source, row.id, [tag]);
+          counts.set(tag, (counts.get(tag) ?? 0) + 1);
+          done++;
+        };
+
+        // Small worker pool: bounded parallelism without loading all raws at once.
+        let cursor = 0;
+        const workers = Array.from({ length: Math.min(concurrency, pending.length) }, async () => {
+          for (;;) {
+            const index = cursor++;
+            const row = pending[index];
+            if (!row) return;
+            await classifyRow(row);
+          }
+        });
+        await Promise.all(workers);
+
+        console.log(
+          `Classified ${done} of ${pending.length} sessions (${useLlm ? `LLM ok=${llmOk}, fallback=${done - llmOk}` : "rule engine"}).`,
+        );
+        for (const [tag, n] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {
+          console.log(`  ${tag.padEnd(15)} ${n}`);
+        }
+      } finally {
+        store.close();
       }
-      console.log(
-        `Classified ${done} sessions (${useLlm ? `LLM ok=${llmOk}, fallback=${done - llmOk}` : "rule engine"}).`,
-      );
-      for (const [tag, n] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {
-        console.log(`  ${tag.padEnd(15)} ${n}`);
-      }
-    } finally {
-      store.close();
-    }
-  });
+    },
+  );
 
 program
   .command("convert")
@@ -280,12 +342,32 @@ program
   .action(async (opts: { port: string; db: string; headless?: boolean }) => {
     const store = new Store(opts.db);
     const transport = new LocalTransport();
-    let scanning = false;
-    let scanStartedAt = 0;
-    const remoteJobs = new Map<
-      string,
-      { status: string; startedAt: number; summary?: unknown; error?: string }
-    >();
+    interface ScanJob {
+      status: "running" | "ok" | "error";
+      startedAt: number;
+      finishedAt?: number;
+      summary?: unknown;
+      error?: string;
+    }
+    let localJob: ScanJob | null = null;
+    const remoteJobs = new Map<string, ScanJob>();
+
+    // Drop finished remote job entries older than an hour so the map cannot
+    // grow without bound over a long-lived server.
+    const pruneFinishedJobs = (): void => {
+      const cutoff = Date.now() - 60 * 60 * 1000;
+      for (const [name, job] of remoteJobs) {
+        if (job.status !== "running" && (job.finishedAt ?? job.startedAt) < cutoff) {
+          remoteJobs.delete(name);
+        }
+      }
+    };
+
+    const runScan = async (transport_: Transport, label: string): Promise<unknown> => {
+      const summary = await discoverAndIngest(transport_, store);
+      console.error(`[scan] ${label} finished: ${summary.tools.length} tools`);
+      return summary;
+    };
 
     const handleApi = async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
@@ -293,23 +375,38 @@ program
         return Response.json(buildDashboardData(store));
       }
       if (url.pathname === "/api/scan" && req.method === "POST") {
-        if (scanning) return Response.json({ status: "busy" }, { status: 409 });
-        scanning = true;
-        scanStartedAt = Date.now();
-        try {
-          const summary = await discoverAndIngest(transport, store);
-          return Response.json({ status: "ok", summary });
-        } catch (err) {
-          return Response.json({ status: "error", error: String(err) }, { status: 500 });
-        } finally {
-          scanning = false;
+        if (localJob?.status === "running") {
+          return Response.json({ status: "busy" }, { status: 409 });
         }
+        localJob = { status: "running", startedAt: Date.now() };
+        // Async like the remote path: the client polls /api/scan/status.
+        void runScan(transport, "local")
+          .then((summary) => {
+            if (localJob?.status === "running") {
+              localJob = { ...localJob, status: "ok", finishedAt: Date.now(), summary };
+            }
+          })
+          .catch((err: unknown) => {
+            if (localJob?.status === "running") {
+              localJob = {
+                ...localJob,
+                status: "error",
+                finishedAt: Date.now(),
+                error: String(err).slice(0, 300),
+              };
+            }
+          });
+        return Response.json({ status: "started" }, { status: 202 });
       }
       if (url.pathname === "/api/scan/status") {
-        return Response.json({ scanning, elapsedMs: scanning ? Date.now() - scanStartedAt : 0 });
+        return Response.json({
+          ...(localJob ?? { scanning: false }),
+          elapsedMs: localJob?.status === "running" ? Date.now() - localJob.startedAt : 0,
+        });
       }
       if (url.pathname === "/api/remotes") {
         if (req.method === "GET") {
+          pruneFinishedJobs();
           return Response.json({
             remotes: loadRemotes().map((r) => ({
               ...r,
@@ -352,27 +449,34 @@ program
           }
           remoteJobs.set(name, { status: "running", startedAt: Date.now() });
           void (async () => {
+            const started = remoteJobs.get(name);
             try {
               const sshTransport = new SshTransport(name);
               const summary = await discoverAndIngest(sshTransport, store);
-              remoteJobs.set(name, {
-                status: "ok",
-                startedAt: Date.now(),
-                summary: summary.tools.length,
-              });
+              if (started?.status === "running") {
+                remoteJobs.set(name, {
+                  ...started,
+                  status: "ok",
+                  finishedAt: Date.now(),
+                  summary: summary.tools.length,
+                });
+              }
             } catch (err) {
-              remoteJobs.set(name, {
-                status: "error",
-                startedAt: Date.now(),
-                error: String(err).slice(0, 300),
-              });
+              if (started?.status === "running") {
+                remoteJobs.set(name, {
+                  ...started,
+                  status: "error",
+                  finishedAt: Date.now(),
+                  error: String(err).slice(0, 300),
+                });
+              }
             }
           })();
           return Response.json({ ok: true });
         }
       }
       if (url.pathname === "/api/health") {
-        return Response.json({ ok: true, scanning });
+        return Response.json({ ok: true, scanning: localJob?.status === "running" });
       }
       return new Response("not found", { status: 404 });
     };
@@ -453,7 +557,7 @@ function saveRemotes(remotes: { name: string; addedAt: number }[]): void {
 }
 
 function buildDashboardData(store: Store): Record<string, unknown> {
-  const rows = store.allSessions();
+  const rows = store.listSessions();
   return {
     generatedAt: new Date().toISOString(),
     totals: totals(rows),
@@ -478,6 +582,19 @@ function safeParseFiles(json: string): string[] {
     return JSON.parse(json) as string[];
   } catch {
     return [];
+  }
+}
+
+function safeParseTags(json: string): string[] {
+  const parsed = safeJsonParseLoose(json);
+  return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === "string") : [];
+}
+
+function safeJsonParseLoose(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
   }
 }
 
@@ -508,7 +625,7 @@ program
     }
   });
 
-function printReport(rows: StoredSession[], granularity: "day" | "week" | "month"): void {
+function printReport(rows: SessionSummary[], granularity: "day" | "week" | "month"): void {
   if (rows.length === 0) {
     console.log("No sessions indexed yet. Run `session-forge scan` first.");
     return;

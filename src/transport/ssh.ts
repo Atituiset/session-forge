@@ -7,6 +7,11 @@ export class SshTransport implements Transport {
   readonly canExec = true;
   private cachedHost: HostInfo | null = null;
 
+  // Hard ceiling on any single remote command. ConnectTimeout only covers the
+  // TCP handshake — without this a hung remote `find`/`cat` would stall a scan
+  // (and the serve loop) forever.
+  private static readonly EXEC_TIMEOUT_MS = 30_000;
+
   constructor(private readonly hostArg: string) {
     this.label = `ssh:${hostArg}`;
   }
@@ -33,12 +38,17 @@ export class SshTransport implements Transport {
 
   async exec(argv: string[]): Promise<ExecResult> {
     const proc = Bun.spawn(this.baseArgs(argv), { stdout: "pipe", stderr: "pipe" });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    const exitCode = await proc.exited;
-    return { exitCode, stdout, stderr };
+    const timer = setTimeout(() => proc.kill(), SshTransport.EXEC_TIMEOUT_MS);
+    try {
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ]);
+      const exitCode = await proc.exited;
+      return { exitCode, stdout, stderr };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async host(): Promise<HostInfo> {
@@ -73,10 +83,15 @@ export class SshTransport implements Transport {
       stdout: "pipe",
       stderr: "pipe",
     });
-    const buf = new Uint8Array(await new Response(proc.stdout).arrayBuffer());
-    const code = await proc.exited;
-    if (code !== 0) throw new Error(`ssh binary fetch failed (exit ${code})`);
-    return buf;
+    const timer = setTimeout(() => proc.kill(), SshTransport.EXEC_TIMEOUT_MS);
+    try {
+      const buf = new Uint8Array(await new Response(proc.stdout).arrayBuffer());
+      const code = await proc.exited;
+      if (code !== 0) throw new Error(`ssh binary fetch failed (exit ${code})`);
+      return buf;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async listDir(dirPath: string): Promise<DirEntry[] | null> {
@@ -114,6 +129,78 @@ export class SshTransport implements Transport {
       .filter((line) => line.length > 0)
       .sort();
   }
+
+  // One find(1) round trip for all patterns instead of one per pattern.
+  async globMany(patterns: string[]): Promise<string[][]> {
+    const normalized = patterns.map((p) => p.replaceAll("\\", "/"));
+    const groups = normalized.map(() => new Set<string>());
+    type Spec = { base: string; wholename: string; maxdepth: number; group: number };
+    const specs: Spec[] = normalized.map((pattern, i) => ({
+      ...globToFind(pattern),
+      group: i,
+    }));
+    const findArgs: string[] = ["find"];
+    const byBase = new Map<string, Spec[]>();
+    for (const spec of specs) {
+      const list = byBase.get(spec.base) ?? [];
+      list.push(spec);
+      byBase.set(spec.base, list);
+    }
+    let first = true;
+    for (const [base, baseSpecs] of byBase) {
+      const maxdepth = Math.max(...baseSpecs.map((s) => s.maxdepth));
+      findArgs.push(first ? base : "-o", "(");
+      first = false;
+      findArgs.push(base, "-maxdepth", String(maxdepth), "-type", "f", "(");
+      baseSpecs.forEach((spec, j) => {
+        if (j > 0) findArgs.push("-o");
+        findArgs.push("-wholename", spec.wholename);
+      });
+      findArgs.push(")");
+    }
+    const r = await this.exec(findArgs);
+    if (r.exitCode !== 0 && r.stdout.trim() === "" && !r.stderr.includes("No such file")) {
+      throw new Error(`remote find failed: ${r.stderr.trim().slice(0, 200)}`);
+    }
+    const found = r.stdout.split("\n").filter((line) => line.length > 0);
+    for (const line of found) {
+      for (const spec of specs) {
+        if (wholenameMatches(spec, line)) groups[spec.group]?.add(line);
+      }
+    }
+    return groups.map((set) => [...set].sort());
+  }
+}
+
+// find(1)'s -wholename uses fnmatch semantics; replicate them client-side so a
+// merged multi-pattern find can be attributed back to the right pattern group.
+function wholenameMatches(spec: { base: string; wholename: string }, candidate: string): boolean {
+  return findWholenameToRegex(spec.wholename).test(candidate);
+}
+
+export function findWholenameToRegex(wholename: string): RegExp {
+  let out = "";
+  for (let i = 0; i < wholename.length; i++) {
+    const ch = wholename[i];
+    if (ch === undefined) break;
+    if (ch === "*")
+      out += ".*"; // fnmatch WITHOUT FNM_PATHNAME: * crosses "/"
+    else if (ch === "?") out += "[^/]";
+    else if (ch === "[") {
+      // Copy the bracket expression, translating find's `[!...]` negation to
+      // JS `[^...]`.
+      const end = wholename.indexOf("]", i + 1);
+      if (end === -1) {
+        out += "\\[";
+      } else {
+        let expr = wholename.slice(i, end + 1);
+        if (expr.startsWith("[!")) expr = `[^${expr.slice(2)}`;
+        out += expr;
+        i = end;
+      }
+    } else out += ch.replace(/[.+^${}()|\\]/g, "\\$&");
+  }
+  return new RegExp(`^${out}$`);
 }
 
 export function globToFind(pattern: string): { base: string; wholename: string; maxdepth: number } {
@@ -127,6 +214,13 @@ export function globToFind(pattern: string): { base: string; wholename: string; 
   const base = baseParts.join("/") || "/";
   const prefix = baseParts.join("/");
   const rest = segments.slice(baseParts.length);
+  if (rest.length === 0) {
+    // Literal path (no wildcard segment). Note: `${prefix}/` with an empty
+    // rest would append a bogus trailing slash — return the path as-is.
+    return { base, wholename: normalized, maxdepth: 0 };
+  }
+  // `[!/]*` per segment: fnmatch without FNM_PATHNAME would let a bare `*`
+  // cross `/`, so the explicit class keeps glob semantics on the remote.
   const translated = rest
     .map((seg) => (seg === "**" ? "*" : seg.replaceAll("*", "[!/]*")))
     .join("/");

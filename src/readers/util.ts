@@ -39,15 +39,26 @@ export function safeJsonParse(text: string): unknown {
   }
 }
 
+// Shared with enrich: extract `*** Update/Add/Delete File:` names from an
+// apply_patch body.
+export function collectPatchFiles(patch: string, out: Set<string>): void {
+  const re = /\*\*\* (Update|Add|Delete) File: (.+)/g;
+  for (const m of patch.matchAll(re)) {
+    const name = m[2];
+    if (name) out.add(name.trim());
+  }
+}
+
 export function makeMsg(partial: Partial<NirMessage> & { role: NirMessage["role"] }): NirMessage {
+  // Spread partial FIRST so explicitly-passed defaults win; then re-apply the
+  // fallbacks only for keys that are still undefined.
   return {
+    ...partial,
     content: partial.content ?? "",
     timestamp: partial.timestamp ?? null,
     toolName: partial.toolName ?? null,
     toolInput: partial.toolInput ?? null,
     model: partial.model ?? null,
-    tokens: partial.tokens,
-    ...partial,
   };
 }
 
