@@ -148,6 +148,54 @@ describe("opencode reader", () => {
 });
 
 describe("store", () => {
+  test("ingest-format upgrade resets revs once so old data re-ingests", () => {
+    const dbPath = path.join(dir, "cache-fmt.db");
+    const session: NirSession = {
+      id: "fmt1",
+      source: "t",
+      sourceVersion: null,
+      projectPath: null,
+      startedAt: null,
+      endedAt: null,
+      messages: [
+        {
+          role: "user",
+          content: "x",
+          timestamp: null,
+          toolName: null,
+          toolInput: null,
+          model: null,
+          thinking: null,
+        },
+      ],
+      rawMeta: {},
+    };
+    const seed = (rev: number, userVersion: number): void => {
+      const raw = new Database(dbPath, { create: true });
+      raw.exec("PRAGMA journal_mode = WAL");
+      const store = new Store(dbPath);
+      store.upsert(session, "f", rev);
+      store.close();
+      raw.exec(`PRAGMA user_version = ${userVersion}`);
+      raw.close();
+    };
+    // Simulate a pre-upgrade database: high rev, no format version recorded.
+    seed(99, 0);
+    const upgraded = new Store(dbPath);
+    // rev was reset → a lower file rev still wins and refreshes the row.
+    expect(upgraded.upsert(session, "f", 1).status).toBe("updated");
+    upgraded.close();
+    const check = new Database(dbPath, { readonly: true });
+    expect(
+      (check.prepare("PRAGMA user_version").get() as { user_version: number }).user_version,
+    ).toBe(2);
+    check.close();
+    // Second open: format already current → no reset, rev dedup works again.
+    const again = new Store(dbPath);
+    expect(again.upsert(session, "f", 1).status).toBe("skipped");
+    again.close();
+  });
+
   test("upsert dedups by rev and prunes stale", async () => {
     const store = new Store(path.join(dir, "cache.db"));
     const session: NirSession = {

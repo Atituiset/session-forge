@@ -14,6 +14,12 @@ export class Store {
   private upsertStmt: ReturnType<Database["prepare"]>;
   private getRevStmt: ReturnType<Database["prepare"]>;
 
+  // Bump whenever readers start extracting MORE from the same files
+  // (2 = thinking/reasoning capture). On upgrade the stored revs are
+  // reset so every session file is re-ingested once — rows are updated
+  // in place via upsert, so tags and other row data survive.
+  private static readonly INGEST_FORMAT_VERSION = 2;
+
   constructor(dbPath: string) {
     mkdirSync(path.dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath, { create: true });
@@ -57,6 +63,14 @@ export class Store {
       } catch {
         // column already exists
       }
+    }
+    // Ingest-format upgrade: force one full re-ingest so rows scanned by an
+    // older reader gain newly captured data (e.g. thinking). rev=0 loses to
+    // every real file rev, and upsert refreshes rows in place (tags kept).
+    const uv = this.db.prepare("PRAGMA user_version").get() as { user_version: number };
+    if (uv.user_version < Store.INGEST_FORMAT_VERSION) {
+      this.db.exec("UPDATE sessions SET rev = 0");
+      this.db.exec(`PRAGMA user_version = ${Store.INGEST_FORMAT_VERSION}`);
     }
     this.upsertStmt = this.db.prepare(
       `INSERT INTO sessions (source, id, rev, project_path, started_at, ended_at, model,
