@@ -8,13 +8,19 @@ export type CanonicalTool =
   | "web"
   | "other";
 
+// Every variant is grounded in a name the readers actually emit or parse:
+// apply_patch/exec_command (codex rollout, src/readers/codex_family.ts),
+// read_file (codewhale tool_calls[].function), exec_command (kimi toolCalls),
+// PascalCase Edit/Write/... (claude-code tool_use), lowercase bash/edit/...
+// (opencode tool parts), and the CODE_ACTION/VIEW_FILE/... action names of
+// antigravity transcripts (src/readers/antigravity.ts).
 const CANONICAL_MAP: [RegExp, CanonicalTool][] = [
-  [/^(edit|multiedit|notebookedit|apply_patch)$/i, "edit"],
+  [/^(edit|multiedit|notebookedit|apply_patch|code_action)$/i, "edit"],
   [/^(write|create_file)$/i, "write"],
-  [/^(read|read_file|view)$/i, "read"],
+  [/^(read|read_file|view|view_file)$/i, "read"],
   [/^(bash|shell|exec_command|terminal|run_command)$/i, "bash"],
-  [/^(grep|search|rg|find)$/i, "search"],
-  [/^(glob|ls|list_dir|list)$/i, "list"],
+  [/^(grep|search|rg|find|grep_search)$/i, "search"],
+  [/^(glob|ls|list_dir|list|list_directory)$/i, "list"],
   [/^(webfetch|web_search|browser)$/i, "web"],
 ];
 

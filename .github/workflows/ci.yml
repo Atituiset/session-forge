@@ -80,6 +80,17 @@ jobs:
       - name: panel click-through tests
         run: bunx playwright test --reporter=line
 
+  roundtrip:
+    # IO-05 R3: import -> convert -> re-import message retention per family.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: ".bun-version"
+      - run: bun install --frozen-lockfile
+      - run: bash scripts/roundtrip.sh
+
   legacy-migration:
     # The 0.1.6 incident: new engine + old-schema db must migrate in place.
     runs-on: ${{ matrix.os }}
