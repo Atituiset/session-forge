@@ -3,7 +3,10 @@ const fmt = (n) => n >= 1e9 ? `${(n / 1e9).toFixed(2)}G` : n >= 1e6 ? `${(n / 1e
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const short = (s, n = 28) => s.length > n ? `…${s.slice(-n + 1)}` : s;
 const API = new URLSearchParams(location.search).get("api") ?? "http://127.0.0.1:4177";
-const isTauri = typeof window.__TAURI_INTERNALS__ !== "undefined";
+// NOTE: Tauri injects a non-configurable `window.isTauri` global — a
+// top-level `const isTauri` here would be a SyntaxError ("already declared")
+// and kill the whole script. Use a different name.
+const hasTauriBridge = typeof window.__TAURI_INTERNALS__ !== "undefined";
 let engineOnline = false;
 
 /* ── 窗口控制：最小化 / 放大 / X=最小化到托盘 ── */
@@ -23,7 +26,7 @@ function tauriWindowInvoke(cmd) {
   return map[cmd] ?? null;
 }
 
-if (isTauri) {
+if (hasTauriBridge) {
   const minFn = tauriWindowInvoke("minimize");
   const maxFn = tauriWindowInvoke("toggle_maximize");
   const hideFn = tauriWindowInvoke("hide");
@@ -274,7 +277,7 @@ $("btn-remote-add").onclick = async () => {
 $("btn-scan").onclick = runScan;
 $("btn-export").onclick = () => window.open(`${API}/api/data`, "_blank");
 
-if (isTauri) {
+if (hasTauriBridge) {
   const internals = window.__TAURI_INTERNALS__;
   const listen = internals?.invoke && internals?.transformCallback
     ? (event, cb) => {
