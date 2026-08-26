@@ -124,7 +124,7 @@ async fn supervise_engine(app: tauri::AppHandle) {
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(line) | CommandEvent::Stderr(line) => {
-                    log_engine(&log_path, line.trim_end())
+                    log_engine(&log_path, String::from_utf8_lossy(&line).trim_end())
                 }
                 CommandEvent::Error(err) => log_engine(&log_path, &format!("engine error: {err}")),
                 CommandEvent::Terminated(status) => {
