@@ -20,6 +20,7 @@ import { renderKnowledgeBase } from "./output/markdown.ts";
 import { bar, renderTable } from "./output/terminal.ts";
 import type { SessionSummary } from "./store.ts";
 import { defaultStorePath, Store } from "./store.ts";
+import { filterNewHosts, parseSshConfigHosts, sshConfigPath } from "./ssh_config.ts";
 import { LocalTransport } from "./transport/local.ts";
 import { SshTransport } from "./transport/ssh.ts";
 import { SshLibTransport } from "./transport/ssh_lib.ts";
@@ -526,6 +527,9 @@ program
         }
       }
       const remoteMatch = url.pathname.match(/^\/api\/remotes\/([^/]+?)(\/scan)?$/);
+      if (url.pathname === "/api/remotes/import-ssh" && req.method === "POST") {
+        return Response.json(await importSshConfigRemotes());
+      }
       if (remoteMatch) {
         const name = decodeURIComponent(remoteMatch[1] ?? "");
         if (req.method === "DELETE") {
@@ -600,6 +604,13 @@ program
     });
     if (!opts.headless) {
       console.log(`SessionForge engine listening on http://127.0.0.1:${server.port}`);
+    }
+    // Auto-register concrete hosts from ~/.ssh/config as scannable remotes.
+    const sshImport = await importSshConfigRemotes();
+    if (sshImport.added > 0) {
+      console.error(
+        `[remotes] auto-imported ${sshImport.added} host(s) from ssh config: ${sshImport.names.join(", ")}`,
+      );
     }
     // Periodic re-scan: each cycle re-parses candidates and the store dedups by
     // rev, so unchanged files are skipped; mtime pre-filtering is a future
@@ -690,6 +701,28 @@ function saveRemotes(remotes: RemoteEntry[]): void {
       2,
     ),
   );
+}
+
+/**
+ * Merge concrete Host entries from ~/.ssh/config into the remotes list.
+ * Scans connect via `ssh <alias>`, so OpenSSH applies HostName/User/Port/
+ * IdentityFile from the config itself — we only register the alias.
+ */
+async function importSshConfigRemotes(): Promise<{ added: number; names: string[] }> {
+  let text: string;
+  try {
+    text = await Bun.file(sshConfigPath()).text();
+  } catch {
+    return { added: 0, names: [] };
+  }
+  const fresh = filterNewHosts(loadRemotes(), parseSshConfigHosts(text));
+  if (fresh.length === 0) return { added: 0, names: [] };
+  const remotes = loadRemotes();
+  for (const h of fresh) {
+    remotes.push({ name: h.name, host: h.host, username: h.username, addedAt: Date.now() });
+  }
+  saveRemotes(remotes);
+  return { added: fresh.length, names: fresh.map((h) => h.name) };
 }
 
 function buildDashboardData(store: Store): Record<string, unknown> {

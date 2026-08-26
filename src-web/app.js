@@ -274,6 +274,22 @@ $("btn-remote-add").onclick = async () => {
   loadRemotes();
 };
 
+/* ── 从 ~/.ssh/config 导入远端机器 ── */
+$("btn-ssh-import").onclick = async () => {
+  const btn = $("btn-ssh-import");
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${API}/api/remotes/import-ssh`, { method: "POST" });
+    const j = await res.json().catch(() => ({}));
+    btn.textContent = j.added > 0 ? `已导入 ${j.added} 台` : "没有新的主机";
+    setTimeout(() => { btn.textContent = "从 ~/.ssh/config 导入"; btn.disabled = false; }, 2000);
+    loadRemotes();
+  } catch {
+    btn.textContent = "导入失败";
+    setTimeout(() => { btn.textContent = "从 ~/.ssh/config 导入"; btn.disabled = false; }, 2000);
+  }
+};
+
 /* ── 会话浏览：列表 + 详情浮层 ── */
 const sessionsQuery = { q: "", source: "", offset: 0 };
 let sessionsTotal = 0;
