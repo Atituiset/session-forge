@@ -45,16 +45,19 @@ test.afterAll(async () => {
   engine?.kill();
 });
 
-// Read the CSP from tauri.conf.json at runtime so this guard can never drift
-// from what production actually enforces.
+// v0.1.8–v0.1.10 incidents: WebView2 + Tauri's nonce-based CSP modification
+// silently refused to execute our script no matter how script-src was tuned
+// ('unsafe-inline', external file — all failed on real Windows). Fix: ship NO
+// custom CSP at all. This guard fails if anyone reintroduces a hand-written
+// policy without re-verifying on real Windows hardware.
 import { readFileSync } from "node:fs";
 
-const PROD_CSP: string = (() => {
-  const conf = JSON.parse(
-    readFileSync(path.resolve(process.cwd(), "src-tauri/tauri.conf.json"), "utf8"),
-  ) as { app?: { security?: { csp?: string } } };
-  return conf.app?.security?.csp ?? "";
-})();
+const CONF = JSON.parse(
+  readFileSync(path.resolve(process.cwd(), "src-tauri/tauri.conf.json"), "utf8"),
+) as {
+  app?: { security?: { csp?: string | null; dangerousDisableAssetCspModification?: boolean } };
+};
+const PROD_CSP: string | null = CONF.app?.security?.csp ?? null;
 
 // Regression guard (the v0.1.8 "every button dead" incident): the packaged app
 // enforces this CSP on tauri://localhost, which silently blocked our inline
@@ -79,7 +82,6 @@ test.describe("production CSP parity", () => {
         };
         res.writeHead(200, {
           "content-type": types[path.extname(file)] ?? "application/octet-stream",
-          "content-security-policy": PROD_CSP,
         });
         fs.createReadStream(path.join(root, file)).pipe(res);
       })
@@ -90,9 +92,16 @@ test.describe("production CSP parity", () => {
     cspServer?.close();
   });
 
-  test("panel boots and binds buttons under the production CSP", async ({ page }) => {
-    // Explicit contract: inline <script> must be allowed by the shipped policy.
-    expect(PROD_CSP).toMatch(/script-src[^;]*'unsafe-inline'/);
+  test("panel boots with the shipped security config (no custom CSP)", async ({ page }) => {
+    // Guard: a hand-written CSP broke script execution on WebView2 in
+    // v0.1.8-v0.1.10 (nonce modification). Fail if one reappears.
+    if (PROD_CSP) {
+      throw new Error(
+        `tauri.conf.json sets a custom CSP (${PROD_CSP.slice(0, 60)}...). ` +
+          "WebView2 + Tauri nonce modification broke script execution before. " +
+          "Only reintroduce after manual verification on real Windows.",
+      );
+    }
     await page.goto(`http://127.0.0.1:${PORT + 1}/index.html?api=${API}`);
     // If inline JS was blocked, these never appear/change — fails fast.
     await expect(page.locator("#engine-pill-text")).toContainText("ENGINE ONLINE", {
