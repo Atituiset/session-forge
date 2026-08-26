@@ -1,6 +1,6 @@
 {
   "name": "session-forge",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "description": "Aggregate AI coding agent sessions into searchable, reusable knowledge assets",
   "type": "module",
   "bin": {
