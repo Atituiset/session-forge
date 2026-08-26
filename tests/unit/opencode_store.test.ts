@@ -3,11 +3,11 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { NirSession } from "../src/nir/schema.ts";
-import { OpencodeSqliteReader } from "../src/readers/opencode_sqlite.ts";
-import type { ScanEvent } from "../src/readers/util.ts";
-import { Store } from "../src/store.ts";
-import { LocalTransport } from "../src/transport/local.ts";
+import type { NirSession } from "../../src/nir/schema.ts";
+import { OpencodeSqliteReader } from "../../src/readers/opencode_sqlite.ts";
+import type { ScanEvent } from "../../src/readers/util.ts";
+import { Store } from "../../src/store.ts";
+import { LocalTransport } from "../../src/transport/local.ts";
 
 const dir = mkdtempSync(path.join(tmpdir(), "sf-test-"));
 const dbPath = path.join(dir, "opencode.db");

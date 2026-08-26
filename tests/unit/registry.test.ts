@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { expandHome, resolveCandidates, TOOLS } from "../src/registry.ts";
+import { expandHome, resolveCandidates, TOOLS } from "../../src/registry.ts";
 
 describe("registry", () => {
   test("expands ~ to injected home dir", () => {

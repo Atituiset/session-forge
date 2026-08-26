@@ -1,0 +1,4 @@
+[test]
+# Playwright specs run in their own CI job (bunx playwright test), not under
+# bun test — the two runners conflict over the same files.
+root = "tests/unit"

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type { NirSession } from "../src/nir/schema.ts";
-import { ClaudeCodeReader } from "../src/readers/claude_code.ts";
-import { CodexFamilyReader } from "../src/readers/codex_family.ts";
-import type { ScanEvent } from "../src/readers/util.ts";
-import { LocalTransport } from "../src/transport/local.ts";
+import type { NirSession } from "../../src/nir/schema.ts";
+import { ClaudeCodeReader } from "../../src/readers/claude_code.ts";
+import { CodexFamilyReader } from "../../src/readers/codex_family.ts";
+import type { ScanEvent } from "../../src/readers/util.ts";
+import { LocalTransport } from "../../src/transport/local.ts";
 
 async function collect(gen: AsyncGenerator<ScanEvent>): Promise<{
   sessions: NirSession[];

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { makeNirSession, nirSessionSchema } from "../src/nir/schema.ts";
+import { makeNirSession, nirSessionSchema } from "../../src/nir/schema.ts";
 
 const validSession = {
   id: "s1",

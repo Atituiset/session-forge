@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { findWholenameToRegex, globToFind } from "../src/transport/ssh.ts";
+import { findWholenameToRegex, globToFind } from "../../src/transport/ssh.ts";
 
 describe("globToFind + wholename matcher", () => {
   test("single-star pattern: remote fnmatch semantics (star crosses /)", () => {

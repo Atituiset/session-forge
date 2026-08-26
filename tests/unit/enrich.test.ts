@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { enrichSession } from "../src/enrich/index.ts";
-import type { NirSession } from "../src/nir/schema.ts";
+import { enrichSession } from "../../src/enrich/index.ts";
+import type { NirSession } from "../../src/nir/schema.ts";
 
 function sessionWith(
   messages: NirSession["messages"],
@@ -122,7 +122,7 @@ describe("enrich", () => {
 
 describe("intent rules", () => {
   test("classifies by keywords", async () => {
-    const { ruleClassify } = await import("../src/llm_enrich/intent.ts");
+    const { ruleClassify } = await import("../../src/llm_enrich/intent.ts");
     expect(ruleClassify("fix the login crash")).toBe("bug_fix");
     expect(ruleClassify("update the README docs")).toBe("documentation");
     expect(ruleClassify("refactor the auth module")).toBe("refactor");
