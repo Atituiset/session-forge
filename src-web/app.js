@@ -44,6 +44,8 @@ function setPill(ok, text) {
   engineOnline = ok;
   const pill = $("engine-pill");
   pill.classList.toggle("offline", !ok);
+  // Offline on the desktop app: sidecar stdout/stderr lands in this log.
+  pill.title = ok ? "" : "引擎未响应 · 日志见 ~/.session-forge/engine.log";
   $("engine-pill-text").textContent = text;
   $("btn-scan").disabled = !ok;
 }
