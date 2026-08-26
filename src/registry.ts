@@ -102,9 +102,38 @@ function candidatesFor(spec: ToolSpec, platform: PlatformId, opts: ResolveOption
 }
 
 export function resolveCandidates(platform: PlatformId, opts: ResolveOptions): Candidate[] {
+  // CI/test hook: repoint every pattern at a fixture directory so scans are
+  // deterministic and never touch the runner's real home.
+  const fixtureRoot = process.env.SESSION_FORGE_TEST_FIXTURES;
+  if (fixtureRoot) {
+    const out: Candidate[] = [];
+    for (const spec of TOOLS) {
+      out.push({
+        toolId: spec.id,
+        family: spec.family,
+        pattern: `${fixtureRoot}/${spec.id}${patternSuffixFor(spec.family)}`,
+      });
+    }
+    return out;
+  }
   const out: Candidate[] = [];
   for (const spec of TOOLS) {
     out.push(...candidatesFor(spec, platform, opts));
   }
   return out;
+}
+
+// Glob shape each reader expects under the fixture root (mirrors the real
+// layouts' tail segments).
+function patternSuffixFor(family: ReaderFamily): string {
+  switch (family) {
+    case "claude-code":
+      return "/projects/*/*.jsonl";
+    case "codex-family":
+      return "/sessions/**/*.jsonl";
+    case "opencode-sqlite":
+      return "/opencode.db";
+    case "antigravity-transcript":
+      return "/brain/*/.system_generated/logs/transcript.jsonl";
+  }
 }

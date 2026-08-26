@@ -26,7 +26,73 @@ jobs:
       - run: bun run typecheck
       - run: bun test
       - run: bun run build
-        if: runner.os == 'Linux'
-      - name: smoke test binary
-        if: runner.os == 'Linux'
-        run: ./dist/session-forge --version && ./dist/session-forge scan --db /tmp/smoke.db
+      # Cross-platform binary smoke: version, scan against seeded fixtures,
+      # report/export/classify round-trip — catches per-OS path & sqlite issues
+      # that unit tests (running under `bun run`) cannot see.
+      - name: smoke test binary (posix paths)
+        if: runner.os != 'Windows'
+        run: bash scripts/ci-smoke.sh
+      - name: smoke test binary (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: pwsh scripts/ci-smoke.ps1
+
+  engine-e2e:
+    # Serve-mode API contract test on every OS: health, async scan job,
+    # dashboard data, remotes CRUD with password handling.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: ".bun-version"
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - name: engine serve e2e (posix)
+        if: runner.os != 'Windows'
+        run: bash scripts/engine-e2e.sh
+      - name: engine serve e2e (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: pwsh scripts/engine-e2e.ps1
+
+  ui-e2e:
+    # Headless click-through of the desktop panel (titlebar-independent):
+    # scan button feedback, remote add/delete with credentials, export.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: ".bun-version"
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - name: install playwright chromium
+        run: bunx playwright install --with-deps chromium
+      - name: panel click-through tests
+        run: bunx playwright test --reporter=line
+
+  legacy-migration:
+    # The 0.1.6 incident: new engine + old-schema db must migrate in place.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: ".bun-version"
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - name: legacy schema upgrade (all OS)
+        run: bun run tests/legacy-migration.ts

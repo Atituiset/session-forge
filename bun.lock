@@ -11,9 +11,11 @@
       },
       "devDependencies": {
         "@biomejs/biome": "^2.5.10",
+        "@playwright/test": "^1.62.1",
         "@tauri-apps/cli": "^2.11.4",
         "@types/bun": "^1.4.0",
         "@types/ssh2": "^1.15.5",
+        "playwright": "^1.62.1",
         "typescript": "^7.0.2",
       },
     },
@@ -36,6 +38,8 @@
     "@biomejs/cli-win32-arm64": ["@biomejs/cli-win32-arm64@2.5.10", "https://registry.npmmirror.com/@biomejs/cli-win32-arm64/-/cli-win32-arm64-2.5.10.tgz", { "os": "win32", "cpu": "arm64" }, "sha512-pxAbxduPO4xq/Cvgaa2lOrs9BB0hEXmmDqfMNP4ZOffGOkUrD1/QGw9UAMpFQpX2P8MqTIIRuQKcmetum4Oa6A=="],
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.5.10", "https://registry.npmmirror.com/@biomejs/cli-win32-x64/-/cli-win32-x64-2.5.10.tgz", { "os": "win32", "cpu": "x64" }, "sha512-M+2dgBsl3lXRiTfgPVc2p3anS4Tocojke4rzFLScZ2Y/wmF+36dRb1iHCLiyGqOzQGyTplZH1HnEYviiAqi3nA=="],
+
+    "@playwright/test": ["@playwright/test@1.62.1", "https://registry.npmmirror.com/@playwright/test/-/test-1.62.1.tgz", { "dependencies": { "playwright": "1.62.1" }, "bin": { "playwright": "cli.js" } }, "sha512-DTcUc8qii+cpHvtOwggMtBRMjKZHXYWdw8syRYu2vtzuq4Wxphqq4NfCs5Zt44L6mA8rfDfj+PHnxFc/FeK6mQ=="],
 
     "@tauri-apps/cli": ["@tauri-apps/cli@2.11.4", "https://registry.npmmirror.com/@tauri-apps/cli/-/cli-2.11.4.tgz", { "optionalDependencies": { "@tauri-apps/cli-darwin-arm64": "2.11.4", "@tauri-apps/cli-darwin-x64": "2.11.4", "@tauri-apps/cli-linux-arm-gnueabihf": "2.11.4", "@tauri-apps/cli-linux-arm64-gnu": "2.11.4", "@tauri-apps/cli-linux-arm64-musl": "2.11.4", "@tauri-apps/cli-linux-riscv64-gnu": "2.11.4", "@tauri-apps/cli-linux-x64-gnu": "2.11.4", "@tauri-apps/cli-linux-x64-musl": "2.11.4", "@tauri-apps/cli-win32-arm64-msvc": "2.11.4", "@tauri-apps/cli-win32-ia32-msvc": "2.11.4", "@tauri-apps/cli-win32-x64-msvc": "2.11.4" }, "bin": { "tauri": "tauri.js" } }, "sha512-R8xGtMpwyetawSqm9kYOuMmEqkhUbvcUy8n0aNXIxollKBLESUu5f4Fx+64hgASYm1H+jSWq6jCW6zqTnH6hqQ=="],
 
@@ -119,7 +123,13 @@
 
     "cpu-features": ["cpu-features@0.0.10", "https://registry.npmmirror.com/cpu-features/-/cpu-features-0.0.10.tgz", { "dependencies": { "buildcheck": "~0.0.6", "nan": "^2.19.0" } }, "sha512-9IkYqtX3YHPCzoVg1Py+o9057a3i0fp7S530UWokCSaFVTc7CwXPRiOjRjBQQ18ZCNafx78YfnG+HALxtVmOGA=="],
 
+    "fsevents": ["fsevents@2.3.2", "https://registry.npmmirror.com/fsevents/-/fsevents-2.3.2.tgz", { "os": "darwin" }, "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA=="],
+
     "nan": ["nan@2.28.0", "https://registry.npmmirror.com/nan/-/nan-2.28.0.tgz", {}, "sha512-fTsDz99OTq2sVePhGdp4qQhggZFtKr64ZNVyVajRKtMOkJxYekplBh577PiJB12v/D3s2E5cGtOI45LWp6rnLQ=="],
+
+    "playwright": ["playwright@1.62.1", "https://registry.npmmirror.com/playwright/-/playwright-1.62.1.tgz", { "dependencies": { "playwright-core": "1.62.1" }, "optionalDependencies": { "fsevents": "2.3.2" }, "bin": { "playwright": "cli.js" } }, "sha512-0M+L3LAD8/nm554LOla9Ayx0j0tmFZ0FBcoQ7F1VuVHpM/XpiC8RcDzBQB8W5+hA8L22THxELzeF+2WcUzvcLg=="],
+
+    "playwright-core": ["playwright-core@1.62.1", "https://registry.npmmirror.com/playwright-core/-/playwright-core-1.62.1.tgz", { "bin": { "playwright-core": "cli.js" } }, "sha512-wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw=="],
 
     "safer-buffer": ["safer-buffer@2.1.2", "https://registry.npmmirror.com/safer-buffer/-/safer-buffer-2.1.2.tgz", {}, "sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg=="],
 

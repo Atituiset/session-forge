@@ -1,0 +1,4 @@
+{"timestamp": "2026-08-21T09:00:00Z", "type": "session_meta", "payload": {"id": "e2e-codex-1", "cwd": "/home/ci/proj-beta", "cli_version": "0.2.0"}}
+{"timestamp": "2026-08-21T09:00:01Z", "type": "turn_context", "payload": {"model": "gpt-5-codex"}}
+{"timestamp": "2026-08-21T09:00:02Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "refactor utils"}]}}
+{"timestamp": "2026-08-21T09:00:03Z", "type": "response_item", "payload": {"type": "function_call", "name": "apply_patch", "arguments": "{\"input\":\"*** Begin Patch\\n*** Update File: util.ts\\n-old\\n+new\\n*** End Patch\"}", "call_id": "c1"}}
