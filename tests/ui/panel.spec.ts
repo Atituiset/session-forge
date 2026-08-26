@@ -45,6 +45,49 @@ test.afterAll(async () => {
   engine?.kill();
 });
 
+// Read the CSP from tauri.conf.json at runtime so this guard can never drift
+// from what production actually enforces.
+import { readFileSync } from "node:fs";
+const PROD_CSP: string = (() => {
+  const conf = JSON.parse(
+    readFileSync(path.resolve(process.cwd(), "src-tauri/tauri.conf.json"), "utf8"),
+  ) as { app?: { security?: { csp?: string } } };
+  return conf.app?.security?.csp ?? "";
+})();
+
+// Regression guard (the v0.1.8 "every button dead" incident): the packaged app
+// enforces this CSP on tauri://localhost, which silently blocked our inline
+// <script> when script-src lacked 'unsafe-inline'. Serve the panel over HTTP
+// with exactly that header and require the UI to actually come alive.
+test.describe("production CSP parity", () => {
+  let cspServer: ReturnType<typeof import("node:http").createServer>;
+  test.beforeAll(async () => {
+    const http = await import("node:http");
+    const fs = await import("node:fs");
+    const cspPort = PORT + 1;
+    const root = path.resolve(process.cwd(), "src-web");
+    cspServer = http
+      .createServer((_req, res) => {
+        res.writeHead(200, { "content-type": "text/html", "content-security-policy": PROD_CSP });
+        fs.createReadStream(path.join(root, "index.html")).pipe(res);
+      })
+      .listen(cspPort);
+  });
+
+  test.afterAll(async () => {
+    cspServer?.close();
+  });
+
+  test("panel boots and binds buttons under the production CSP", async ({ page }) => {
+    // Explicit contract: inline <script> must be allowed by the shipped policy.
+    expect(PROD_CSP).toMatch(/script-src[^;]*'unsafe-inline'/);
+    await page.goto(`http://127.0.0.1:${PORT + 1}/index.html?api=${API}`);
+    // If inline JS was blocked, these never appear/change — fails fast.
+    await expect(page.locator("#engine-pill-text")).toContainText("ENGINE ONLINE", { timeout: 15_000 });
+    await expect(page.locator("#btn-scan")).toBeEnabled();
+  });
+});
+
 test.describe("panel boot", () => {
   test("loads without JS errors and shows metrics", async ({ page }) => {
     const errors: string[] = [];
