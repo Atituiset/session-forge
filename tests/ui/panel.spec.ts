@@ -68,9 +68,20 @@ test.describe("production CSP parity", () => {
     const cspPort = PORT + 1;
     const root = path.resolve(process.cwd(), "src-web");
     cspServer = http
-      .createServer((_req, res) => {
-        res.writeHead(200, { "content-type": "text/html", "content-security-policy": PROD_CSP });
-        fs.createReadStream(path.join(root, "index.html")).pipe(res);
+      .createServer((req, res) => {
+        const pathname = (req.url ?? "/").split("?")[0] ?? "/";
+        const file = pathname === "/" ? "index.html" : decodeURIComponent(pathname.slice(1));
+        const types: Record<string, string> = {
+          ".html": "text/html",
+          ".js": "text/javascript",
+          ".css": "text/css",
+          ".svg": "image/svg+xml",
+        };
+        res.writeHead(200, {
+          "content-type": types[path.extname(file)] ?? "application/octet-stream",
+          "content-security-policy": PROD_CSP,
+        });
+        fs.createReadStream(path.join(root, file)).pipe(res);
       })
       .listen(cspPort);
   });
