@@ -168,7 +168,9 @@ test.describe("remote machines", () => {
     expect(finalStatus).toBe("error");
     await page.reload();
     await page.waitForTimeout(1500);
-    await expect(page.locator(".remote-row", { hasText: "unreachable.invalid" })).toContainText(/失败|待扫描/);
+    await expect(page.locator(".remote-row", { hasText: "unreachable.invalid" })).toContainText(
+      /失败|待扫描/,
+    );
     const resp = await fetch(`${API}/api/health`);
     expect((await resp.json()).ok).toBe(true);
   });
