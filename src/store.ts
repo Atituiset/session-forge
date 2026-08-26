@@ -159,6 +159,39 @@ export class Store {
       .all() as SessionSummary[];
   }
 
+  listSessionsPage(opts: { limit: number; offset: number; source?: string; q?: string }): {
+    sessions: SessionSummary[];
+    total: number;
+  } {
+    const where: string[] = [];
+    const params: string[] = [];
+    if (opts.source) {
+      where.push("source = ?");
+      params.push(opts.source);
+    }
+    if (opts.q) {
+      // Escape LIKE wildcards so a query like "a%b" matches literally.
+      const pattern = opts.q.replace(/([%_\\])/g, "\\$1");
+      where.push("(id LIKE ? ESCAPE '\\' OR project_path LIKE ? ESCAPE '\\')");
+      params.push(`%${pattern}%`, `%${pattern}%`);
+    }
+    const whereSql = where.length > 0 ? ` WHERE ${where.join(" AND ")}` : "";
+    const sessions = this.db
+      .prepare(
+        `SELECT source, id, project_path AS projectPath, started_at AS startedAt, ended_at AS endedAt,` +
+          ` model, tokens_in AS tokensIn, tokens_out AS tokensOut, token_source AS tokenSource, cost, rounds,` +
+          ` files_json AS filesJson, additions, deletions, has_error AS hasError, tags AS tagsJson, NULL AS raw` +
+          ` FROM sessions${whereSql} ORDER BY started_at IS NULL, started_at DESC LIMIT ? OFFSET ?`,
+      )
+      .all(...params, opts.limit, opts.offset) as SessionSummary[];
+    const total = (
+      this.db.prepare(`SELECT COUNT(*) AS n FROM sessions${whereSql}`).get(...params) as {
+        n: number;
+      }
+    ).n;
+    return { sessions, total };
+  }
+
   getSession(source: string, id: string): NirSession | null {
     const row = this.db
       .prepare("SELECT raw FROM sessions WHERE source = ? AND id = ?")

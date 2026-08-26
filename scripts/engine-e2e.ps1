@@ -36,6 +36,15 @@ if ($status.status -ne "ok") { Cleanup; throw "scan failed: $($status | ConvertT
 $data = Invoke-RestMethod "$base/api/data" -TimeoutSec 10
 if ($data.totals.sessions -lt 2) { Cleanup; throw "expected >=2 sessions" }
 
+# sessions list endpoint
+$listRes = Invoke-RestMethod "$base/api/sessions?limit=10" -TimeoutSec 10
+if ($null -eq $listRes.sessions) { Cleanup; throw "sessions array missing" }
+if ($null -eq $listRes.total) { Cleanup; throw "total missing" }
+
+# session detail endpoint
+$detail = Invoke-RestMethod "$base/api/session?source=codex&id=e2e-codex-1" -TimeoutSec 10
+if ($detail.messages.Count -lt 1) { Cleanup; throw "messages missing" }
+
 # remotes CRUD: password never persisted, never echoed back
 Invoke-RestMethod "$base/api/remotes" -Method POST -ContentType "application/json" `
   -Body '{"name":"ci@10.255.255.1","username":"ci","password":"supersecret"}' | Out-Null

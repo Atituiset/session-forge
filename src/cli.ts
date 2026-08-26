@@ -12,6 +12,7 @@ import {
   totals,
 } from "./analytics/index.ts";
 import { discoverAndIngest } from "./discovery.ts";
+import { IMPORT_FORMATS, importFile, isImportFormat } from "./import_file.ts";
 import type { IntentTag } from "./llm_enrich/intent.ts";
 import { llmClassify, ruleClassify } from "./llm_enrich/intent.ts";
 import { formatTokens, shortPath } from "./output/format.ts";
@@ -335,6 +336,46 @@ program
   });
 
 program
+  .command("import")
+  .description("Import an external agent session file into the store")
+  .argument("<path>", "session file to import")
+  .requiredOption(
+    "--from <format>",
+    "source format: claude-code | codex | kimi | codewhale | opencode | antigravity" +
+      " (codex-family sub-formats dispatch by file name: kimi needs a wire.jsonl, codewhale a .json, codex a rollout .jsonl)",
+  )
+  .option("--db <path>", "cache database path", defaultStorePath())
+  .action(async (filePath: string, opts: { from: string; db: string }) => {
+    if (!isImportFormat(opts.from)) {
+      console.error(`Unknown format: ${opts.from} (supported: ${IMPORT_FORMATS.join(", ")})`);
+      process.exitCode = 1;
+      return;
+    }
+    const store = new Store(opts.db);
+    try {
+      const result = await importFile(store, filePath, opts.from);
+      for (const issue of result.issues) {
+        console.error(`issue: ${issue}`);
+      }
+      for (const s of result.sessions) {
+        console.log(`${s.status.padEnd(9)} ${s.source} ${s.id} (${s.messages} messages)`);
+      }
+      console.log(
+        `\ninserted: ${result.inserted}  updated: ${result.updated}  skipped: ${result.skipped}`,
+      );
+      if (result.sessions.length === 0) {
+        console.error(`No sessions imported from ${filePath}.`);
+        process.exitCode = 1;
+      }
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    } finally {
+      store.close();
+    }
+  });
+
+program
   .command("serve")
   .description("Run the local data API server (used by desktop panel and ui command)")
   .option("--port <n>", "listen port", "4177")
@@ -376,33 +417,56 @@ program
       return summary;
     };
 
+    // Kicks off the async local scan; the caller polls /api/scan/status.
+    const startLocalScan = (): void => {
+      localJob = { status: "running", startedAt: Date.now() };
+      void runScan(transport, "local")
+        .then((summary) => {
+          if (localJob?.status === "running") {
+            localJob = { ...localJob, status: "ok", finishedAt: Date.now(), summary };
+          }
+        })
+        .catch((err: unknown) => {
+          if (localJob?.status === "running") {
+            localJob = {
+              ...localJob,
+              status: "error",
+              finishedAt: Date.now(),
+              error: String(err).slice(0, 300),
+            };
+          }
+        });
+    };
+
     const handleApi = async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
       if (url.pathname === "/api/data") {
         return Response.json(buildDashboardData(store));
       }
+      if (url.pathname === "/api/sessions" && req.method === "GET") {
+        const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
+        const offset = Math.max(Number(url.searchParams.get("offset")) || 0, 0);
+        return Response.json(
+          store.listSessionsPage({
+            limit,
+            offset,
+            source: url.searchParams.get("source") ?? undefined,
+            q: url.searchParams.get("q") ?? undefined,
+          }),
+        );
+      }
+      if (url.pathname === "/api/session" && req.method === "GET") {
+        const source = url.searchParams.get("source");
+        const id = url.searchParams.get("id");
+        const session = source && id ? store.getSession(source, id) : null;
+        if (!session) return Response.json({ error: "not found" }, { status: 404 });
+        return Response.json(session);
+      }
       if (url.pathname === "/api/scan" && req.method === "POST") {
         if (localJob?.status === "running") {
           return Response.json({ status: "busy" }, { status: 409 });
         }
-        localJob = { status: "running", startedAt: Date.now() };
-        // Async like the remote path: the client polls /api/scan/status.
-        void runScan(transport, "local")
-          .then((summary) => {
-            if (localJob?.status === "running") {
-              localJob = { ...localJob, status: "ok", finishedAt: Date.now(), summary };
-            }
-          })
-          .catch((err: unknown) => {
-            if (localJob?.status === "running") {
-              localJob = {
-                ...localJob,
-                status: "error",
-                finishedAt: Date.now(),
-                error: String(err).slice(0, 300),
-              };
-            }
-          });
+        startLocalScan();
         return Response.json({ status: "started" }, { status: 202 });
       }
       if (url.pathname === "/api/scan/status") {
@@ -537,10 +601,21 @@ program
     if (!opts.headless) {
       console.log(`SessionForge engine listening on http://127.0.0.1:${server.port}`);
     }
+    // Periodic re-scan: each cycle re-parses candidates and the store dedups by
+    // rev, so unchanged files are skipped; mtime pre-filtering is a future
+    // optimization. No per-tick logging — only the usual "[scan] ... finished".
+    const autoscanMs = Number(process.env.SESSION_FORGE_AUTOSCAN_MS ?? 90000) || 90000;
+    let autoscan: ReturnType<typeof setInterval> | null = null;
+    if (process.env.SESSION_FORGE_AUTOSCAN_MS !== "0") {
+      autoscan = setInterval(() => {
+        if (localJob?.status !== "running") startLocalScan();
+      }, autoscanMs);
+    }
     let closed = false;
     const shutdown = (): void => {
       if (closed) return;
       closed = true;
+      if (autoscan) clearInterval(autoscan);
       try {
         store.close();
       } catch {}

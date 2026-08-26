@@ -35,6 +35,14 @@ echo "== dashboard has fixture sessions =="
 N=$(curl -s "$B/api/data" | grep -o '"sessions":[0-9]*' | head -1 | cut -d: -f2)
 [ "${N:-0}" -ge 2 ] || { echo "expected >=2 sessions, got $N"; exit 1; }
 
+echo "== sessions list endpoint =="
+LIST_RES=$(curl -s "$B/api/sessions?limit=10")
+echo "$LIST_RES" | grep -q '"sessions":\[' || { echo "sessions array missing: $LIST_RES"; exit 1; }
+echo "$LIST_RES" | grep -q '"total":' || { echo "total missing: $LIST_RES"; exit 1; }
+
+echo "== session detail endpoint =="
+curl -s "$B/api/session?source=codex&id=e2e-codex-1" | grep -q '"messages":\[' || { echo "messages missing"; exit 1; }
+
 echo "== remotes CRUD: password never persisted =="
 curl -s -X POST "$B/api/remotes" -H 'content-type: application/json' \
   -d '{"name":"ci@10.255.255.1","username":"ci","password":"supersecret"}' | grep -q ok
