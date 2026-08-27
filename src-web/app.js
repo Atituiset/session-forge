@@ -290,13 +290,18 @@ $("btn-ssh-import").onclick = async () => {
   }
 };
 
-/* ── 会话浏览：列表 + 详情浮层 ── */
-const sessionsQuery = { q: "", source: "", offset: 0 };
+/* ── 会话浏览：按项目分组 + 机器切换 + 详情浮层 ── */
+const sessionsQuery = { q: "", source: "", machine: "", offset: 0 };
 let sessionsTotal = 0;
-let lastSessionRows = [];
-const knownSources = [];
+let lastSessionsPayload = null;
 let openSession = null;
 const SESSION_PAGE = 50;
+const collapsedProjects = new Set();
+
+// Remote rows carry the machine in the source: "codex@devbox" (host may
+// itself contain @, e.g. "codex@ops@10.0.0.1" → machine "ops@10.0.0.1").
+const baseTool = (source) => source.split("@")[0];
+const machineOf = (source) => (source.includes("@") ? source.slice(source.indexOf("@") + 1) : null);
 
 const fmtTime = (iso) => {
   if (!iso) return "—";
@@ -310,34 +315,75 @@ async function loadSessions() {
   const params = new URLSearchParams({ limit: String(SESSION_PAGE), offset: String(sessionsQuery.offset) });
   if (sessionsQuery.q) params.set("q", sessionsQuery.q);
   if (sessionsQuery.source) params.set("source", sessionsQuery.source);
+  if (sessionsQuery.machine) params.set("machine", sessionsQuery.machine);
   try {
     const j = await (await fetch(`${API}/api/sessions?${params}`)).json();
     renderSessions(j);
   } catch {}
 }
 
+function fillFilterSelects(sources) {
+  const machineSel = $("session-machine");
+  const machinePrev = machineSel.value;
+  const machines = [...new Set(sources.map(machineOf).filter(Boolean))].sort();
+  machineSel.innerHTML = `<option value="">全部机器</option><option value="local">本机</option>` +
+    machines.map((m) => `<option value="${esc(m)}"${m === machinePrev ? " selected" : ""}>${esc(m)}</option>`).join("");
+  const toolSel = $("session-source");
+  const toolPrev = toolSel.value;
+  const tools = [...new Set(sources.map(baseTool))].sort();
+  toolSel.innerHTML = `<option value="">全部工具</option>` +
+    tools.map((t) => `<option value="${esc(t)}"${t === toolPrev ? " selected" : ""}>${esc(t)}</option>`).join("");
+}
+
 function renderSessions(j) {
   const list = j.sessions ?? [];
-  lastSessionRows = list;
+  lastSessionsPayload = j;
   sessionsTotal = j.total ?? list.length;
   $("session-count").textContent = sessionsTotal ? `${sessionsTotal}` : "";
-  const sel = $("session-source");
-  const prev = sel.value;
-  for (const s of list) if (!knownSources.includes(s.source)) knownSources.push(s.source);
-  sel.innerHTML = `<option value="">全部来源</option>` +
-    knownSources.map((s) => `<option value="${esc(s)}"${s === prev ? " selected" : ""}>${esc(s)}</option>`).join("");
+  fillFilterSelects(j.sources ?? list.map((s) => s.source));
   const el = $("sessions");
   if (!list.length) {
     el.innerHTML = `<div class="remote-empty">没有匹配的会话</div>`;
   } else {
-    el.innerHTML = list.map((s) => `<div class="session-row" data-source="${esc(s.source)}" data-id="${esc(s.id)}">
-      <span class="chip">${esc(s.source)}</span>
-      <div class="meta">
-        <span class="proj" title="${esc(s.projectPath || s.id)}">${esc(short(s.projectPath || s.id, 40))}</span>
-        <span class="sub">${fmtTime(s.startedAt)}${s.endedAt ? ` → ${fmtTime(s.endedAt)}` : ""}</span>
-      </div>
-      <div class="stats">${s.rounds} 轮<b>${fmt(s.tokensIn)} tok</b></div>
-    </div>`).join("");
+    // Group by project, keeping the engine's newest-first ordering: a project
+    // ranks by its most recent session.
+    const groups = new Map();
+    for (const s of list) {
+      const key = s.projectPath || "";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(s);
+    }
+    el.innerHTML = [...groups.entries()].map(([proj, rows]) => {
+      const tokens = rows.reduce((sum, s) => sum + (s.tokensIn || 0), 0);
+      const closed = collapsedProjects.has(proj);
+      const name = proj ? short(proj, 52) : "(无项目路径)";
+      const body = rows.map((s) => {
+        const machine = machineOf(s.source);
+        return `<div class="session-row" data-source="${esc(s.source)}" data-id="${esc(s.id)}">
+          <span class="chip">${esc(baseTool(s.source))}</span>
+          <div class="meta">
+            <span class="proj" title="${esc(s.id)}">${esc(short(s.id, 38))}</span>
+            <span class="sub">${fmtTime(s.startedAt)}${s.endedAt ? ` → ${fmtTime(s.endedAt)}` : ""}${s.model ? ` · ${esc(s.model)}` : ""}${machine ? ` · <span class="machine">@${esc(machine)}</span>` : ""}</span>
+          </div>
+          <div class="stats">${s.rounds} 轮<b>${fmt(s.tokensIn)} tok</b></div>
+        </div>`;
+      }).join("");
+      return `<div class="proj-group${closed ? " closed" : ""}" data-proj="${esc(proj)}">
+        <div class="proj-head"><span class="arrow">▾</span>
+          <span class="pname" title="${esc(proj)}">${esc(name)}</span>
+          <span class="pstats">${rows.length} 会话 · ${fmt(tokens)} tok</span>
+        </div>
+        <div class="proj-body">${body}</div>
+      </div>`;
+    }).join("");
+    el.querySelectorAll(".proj-head").forEach((h) => {
+      h.onclick = () => {
+        const key = h.parentElement.dataset.proj ?? "";
+        if (collapsedProjects.has(key)) collapsedProjects.delete(key);
+        else collapsedProjects.add(key);
+        if (lastSessionsPayload) renderSessions(lastSessionsPayload);
+      };
+    });
     el.querySelectorAll(".session-row").forEach((r) => {
       r.onclick = () => openSessionDetail(r.dataset.source, r.dataset.id);
     });
@@ -440,6 +486,11 @@ $("session-search").addEventListener("input", () => {
 });
 $("session-source").onchange = () => {
   sessionsQuery.source = $("session-source").value;
+  sessionsQuery.offset = 0;
+  loadSessions();
+};
+$("session-machine").onchange = () => {
+  sessionsQuery.machine = $("session-machine").value;
   sessionsQuery.offset = 0;
   loadSessions();
 };

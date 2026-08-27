@@ -254,4 +254,47 @@ describe("store", () => {
     expect(store.findSession("zzz")).toBeNull();
     store.close();
   });
+
+  test("listSessionsPage filters by base tool and machine; distinctSources", () => {
+    const store = new Store(path.join(dir, "cache-filter.db"));
+    const mk = (id: string, source: string): NirSession => ({
+      id,
+      source,
+      sourceVersion: null,
+      projectPath: "/p",
+      startedAt: "2026-08-01T00:00:00Z",
+      endedAt: null,
+      messages: [
+        {
+          role: "user",
+          content: "x",
+          timestamp: null,
+          toolName: null,
+          toolInput: null,
+          model: null,
+          thinking: null,
+        },
+      ],
+      rawMeta: {},
+    });
+    store.upsert(mk("l1", "codex"), "f", 1);
+    store.upsert(mk("r1", "codex@devbox"), "f", 1);
+    store.upsert(mk("r2", "claude-code@ops@10.0.0.1"), "f", 1);
+    type PageOpts = Parameters<Store["listSessionsPage"]>[0];
+    const ids = (opts: Omit<PageOpts, "limit" | "offset">) =>
+      store
+        .listSessionsPage({ ...opts, limit: 10, offset: 0 })
+        .sessions.map((s) => s.id)
+        .sort();
+    // Base tool covers both the local row and remote rows of that tool.
+    expect(ids({ source: "codex" })).toEqual(["l1", "r1"]);
+    expect(ids({ machine: "local" })).toEqual(["l1"]);
+    expect(ids({ machine: "devbox" })).toEqual(["r1"]);
+    // Machine names may themselves contain @ (user@host).
+    expect(ids({ machine: "ops@10.0.0.1" })).toEqual(["r2"]);
+    expect(ids({ source: "codex", machine: "devbox" })).toEqual(["r1"]);
+    expect(ids({ source: "codex", machine: "ops@10.0.0.1" })).toEqual([]);
+    expect(store.distinctSources()).toEqual(["claude-code@ops@10.0.0.1", "codex", "codex@devbox"]);
+    store.close();
+  });
 });

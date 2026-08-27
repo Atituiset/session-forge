@@ -173,15 +173,33 @@ export class Store {
       .all() as SessionSummary[];
   }
 
-  listSessionsPage(opts: { limit: number; offset: number; source?: string; q?: string }): {
+  listSessionsPage(opts: {
+    limit: number;
+    offset: number;
+    source?: string;
+    machine?: string;
+    q?: string;
+  }): {
     sessions: SessionSummary[];
     total: number;
   } {
     const where: string[] = [];
     const params: string[] = [];
     if (opts.source) {
-      where.push("source = ?");
-      params.push(opts.source);
+      // Base tool match: "codex" covers both local "codex" and remote
+      // "codex@host" rows.
+      const tool = opts.source.replace(/([%_\\])/g, "\\$1");
+      where.push("(source = ? OR source LIKE ? ESCAPE '\\')");
+      params.push(opts.source, `${tool}@%`);
+    }
+    if (opts.machine === "local") {
+      // Local rows never carry an @host suffix.
+      where.push("source NOT LIKE '%@%'");
+    } else if (opts.machine) {
+      // Remote rows look like "tool@host" (host itself may contain @).
+      const machine = opts.machine.replace(/([%_\\])/g, "\\$1");
+      where.push("source LIKE ? ESCAPE '\\'");
+      params.push(`%@${machine}`);
     }
     if (opts.q) {
       // Escape LIKE wildcards so a query like "a%b" matches literally.
@@ -204,6 +222,15 @@ export class Store {
       }
     ).n;
     return { sessions, total };
+  }
+
+  /** All distinct source values ("claude-code", "codex@devbox", …) — the
+   *  panel derives machine and tool filter options from these. */
+  distinctSources(): string[] {
+    const rows = this.db.prepare("SELECT DISTINCT source FROM sessions ORDER BY source").all() as {
+      source: string;
+    }[];
+    return rows.map((r) => r.source);
   }
 
   getSession(source: string, id: string): NirSession | null {

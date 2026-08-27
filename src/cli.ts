@@ -447,14 +447,16 @@ program
       if (url.pathname === "/api/sessions" && req.method === "GET") {
         const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
         const offset = Math.max(Number(url.searchParams.get("offset")) || 0, 0);
-        return Response.json(
-          store.listSessionsPage({
+        return Response.json({
+          ...store.listSessionsPage({
             limit,
             offset,
             source: url.searchParams.get("source") ?? undefined,
+            machine: url.searchParams.get("machine") ?? undefined,
             q: url.searchParams.get("q") ?? undefined,
           }),
-        );
+          sources: store.distinctSources(),
+        });
       }
       if (url.pathname === "/api/session" && req.method === "GET") {
         const source = url.searchParams.get("source");

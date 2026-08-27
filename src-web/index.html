@@ -234,6 +234,21 @@
   .session-row .stats b { display: block; color: var(--dim); font-weight: 500; margin-top: 2px; }
   .session-pager { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
   .session-pager .page-info { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+  /* 项目分组 */
+  .proj-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; margin: 10px 0 6px;
+    border-radius: 8px; cursor: pointer; user-select: none; font-size: 12px;
+    background: rgba(167,139,250,.08); border: 1px solid rgba(167,139,250,.18); transition: border-color .2s; }
+  .proj-head:first-child { margin-top: 0; }
+  .proj-head:hover { border-color: rgba(167,139,250,.4); }
+  .proj-head .arrow { color: var(--violet); font-size: 10px; width: 12px; flex-shrink: 0;
+    transition: transform .15s; }
+  .proj-group.closed .proj-head .arrow { transform: rotate(-90deg); }
+  .proj-head .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: var(--mono); color: var(--txt); flex: 1; min-width: 0; }
+  .proj-head .pstats { font-family: var(--mono); font-size: 10.5px; color: var(--dim); flex-shrink: 0; }
+  .proj-group .proj-body { padding-left: 12px; }
+  .proj-group.closed .proj-body { display: none; }
+  .session-row .machine { font-size: 10px; color: var(--amber); }
 
   /* ── 会话详情浮层 ─────────────────────── */
   .overlay { position: fixed; inset: 0; z-index: 50; display: none;
@@ -347,8 +362,9 @@
       <div class="card">
         <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>会话浏览 <span class="count-pill" id="session-count"></span></h2>
         <div class="session-tools">
+          <select id="session-machine"><option value="">全部机器</option></select>
+          <select id="session-source"><option value="">全部工具</option></select>
           <input id="session-search" placeholder="搜索项目或会话 id…" />
-          <select id="session-source"><option value="">全部来源</option></select>
         </div>
         <div class="session-list" id="sessions"></div>
         <div class="session-pager">
