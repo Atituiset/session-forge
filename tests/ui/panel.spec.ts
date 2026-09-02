@@ -311,18 +311,40 @@ test.describe("machine scope", () => {
     expect(none.totals.sessions).toBe(0);
   });
 
-  test("hero machine switch exists and scopes the dashboard", async ({ page }) => {
+  test("one card per machine with tools; clicking a card scopes the dashboard", async ({
+    page,
+  }) => {
     await page.goto(PANEL);
-    const sw = page.locator("#machine-switch");
-    await expect(sw).toBeVisible();
-    await expect(sw.locator("option")).toHaveCount(2); // 全部机器 + 本机
+    const cards = page.locator(".machine-card");
+    await expect(cards).toHaveCount(2); // 全部机器 + 本机（fixtures 无远程数据）
+    await expect(cards.nth(0)).toContainText("全部机器");
+    await expect(cards.nth(1)).toContainText("本机");
+    // Tool chips come from the sources observed on that machine.
+    await expect(cards.nth(1).locator(".chip", { hasText: "claude-code" })).toBeVisible();
     await page.waitForTimeout(1200);
     const before = (await page.locator(".metric .value").first().textContent()) ?? "";
-    await sw.selectOption("local");
+    await cards.nth(1).click();
+    await expect(cards.nth(1)).toHaveClass(/active/);
+    await expect(cards.nth(0)).not.toHaveClass(/active/);
     await page.waitForTimeout(800);
     const after = (await page.locator(".metric .value").first().textContent()) ?? "";
     // Fixtures are all-local: scoping to "本机" keeps the same totals.
     expect(after).toBe(before);
+    await expect(page.locator("#foot")).toContainText("本机");
+    // Switching back restores the aggregate card as active.
+    await cards.nth(0).click();
+    await expect(cards.nth(0)).toHaveClass(/active/);
+  });
+
+  test("/api/machines returns per-machine aggregates with tool chips", async () => {
+    const j = (await (await fetch(`${API}/api/machines`)).json()) as {
+      machines: { machine: string; sessions: number; tools: string[] }[];
+    };
+    const local = j.machines.find((m) => m.machine === "local");
+    expect(local).toBeDefined();
+    expect(local?.sessions).toBeGreaterThan(0);
+    expect(local?.tools).toContain("claude-code");
+    expect(local?.tools).toContain("codex");
   });
 });
 

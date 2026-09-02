@@ -36,6 +36,17 @@ if ($status.status -ne "ok") { Cleanup; throw "scan failed: $($status | ConvertT
 $data = Invoke-RestMethod "$base/api/data" -TimeoutSec 10
 if ($data.totals.sessions -lt 2) { Cleanup; throw "expected >=2 sessions" }
 
+# dashboard machine scoping
+$local = Invoke-RestMethod "$base/api/data?machine=local" -TimeoutSec 10
+if ($local.machine -ne "local") { Cleanup; throw "machine echo missing" }
+$none = Invoke-RestMethod "$base/api/data?machine=ghost-machine" -TimeoutSec 10
+if ($none.totals.sessions -ne 0) { Cleanup; throw "unknown machine should isolate to 0" }
+
+# machines endpoint: one card row per machine
+$machines = Invoke-RestMethod "$base/api/machines" -TimeoutSec 10
+if (-not ($machines.machines | Where-Object { $_.machine -eq "local" })) { Cleanup; throw "local machine missing" }
+if (-not $machines.machines[0].tools) { Cleanup; throw "tools missing" }
+
 # sessions list endpoint
 $listRes = Invoke-RestMethod "$base/api/sessions?limit=10" -TimeoutSec 10
 if ($null -eq $listRes.sessions) { Cleanup; throw "sessions array missing" }

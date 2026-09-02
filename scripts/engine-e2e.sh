@@ -35,6 +35,16 @@ echo "== dashboard has fixture sessions =="
 N=$(curl -s "$B/api/data" | grep -o '"sessions":[0-9]*' | head -1 | cut -d: -f2)
 [ "${N:-0}" -ge 2 ] || { echo "expected >=2 sessions, got $N"; exit 1; }
 
+echo "== dashboard machine scoping =="
+curl -s "$B/api/data?machine=local" | grep -q '"machine":"local"' || { echo "machine echo missing"; exit 1; }
+ZERO=$(curl -s "$B/api/data?machine=ghost-machine" | grep -o '"sessions":[0-9]*' | head -1 | cut -d: -f2)
+[ "${ZERO:-1}" = "0" ] || { echo "unknown machine should isolate to 0 sessions, got $ZERO"; exit 1; }
+
+echo "== machines endpoint: one card row per machine =="
+MACH=$(curl -s "$B/api/machines")
+echo "$MACH" | grep -q '"machine":"local"' || { echo "local machine missing: $MACH"; exit 1; }
+echo "$MACH" | grep -q '"tools":\[' || { echo "tools missing: $MACH"; exit 1; }
+
 echo "== sessions list endpoint =="
 LIST_RES=$(curl -s "$B/api/sessions?limit=10")
 echo "$LIST_RES" | grep -q '"sessions":\[' || { echo "sessions array missing: $LIST_RES"; exit 1; }

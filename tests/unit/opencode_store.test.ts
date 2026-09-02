@@ -334,4 +334,37 @@ describe("store", () => {
     expect(ids("nope")).toEqual([]);
     store.close();
   });
+
+  test("machineSummaries groups rows by machine, local first", () => {
+    const store = new Store(path.join(dir, "cache-machines.db"));
+    const mk = (id: string, source: string): NirSession => ({
+      id,
+      source,
+      sourceVersion: null,
+      projectPath: `/p/${source}`,
+      startedAt: "2026-08-01T00:00:00Z",
+      endedAt: null,
+      messages: [
+        {
+          role: "user",
+          content: "x",
+          timestamp: null,
+          toolName: null,
+          toolInput: null,
+          model: null,
+          thinking: null,
+        },
+      ],
+      rawMeta: {},
+    });
+    store.upsert(mk("l1", "codex"), "f", 1);
+    store.upsert(mk("l2", "claude-code"), "f", 1);
+    store.upsert(mk("r1", "codex@devbox"), "f", 1);
+    const rows = store.machineSummaries();
+    expect(rows.map((r) => r.machine)).toEqual(["local", "devbox"]);
+    expect(rows[0]?.sessions).toBe(2);
+    expect(rows[0]?.projects).toBe(2);
+    expect(rows[1]?.sessions).toBe(1);
+    store.close();
+  });
 });

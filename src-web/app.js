@@ -65,16 +65,59 @@ async function checkEngine() {
   }
 }
 
-/* ── 全局机器范围：看板与会话浏览共用，实现多机切换/隔离 ── */
+/* ── 机器卡片：一台机器一张卡，点击切换看板与会话的数据范围（隔离） ── */
 let machineScope = "";
+let lastMachines = null;
 
-$("machine-switch").onchange = () => {
-  machineScope = $("machine-switch").value;
-  sessionsQuery.machine = machineScope;
+async function loadMachines() {
+  try {
+    const j = await (await fetch(`${API}/api/machines`)).json();
+    lastMachines = j.machines ?? [];
+    renderMachineCards();
+  } catch {}
+}
+
+function renderMachineCards() {
+  if (!lastMachines) return;
+  const all = lastMachines.reduce(
+    (a, m) => ({
+      sessions: a.sessions + m.sessions,
+      tokensIn: a.tokensIn + (m.tokensIn ?? 0),
+      projects: a.projects + m.projects,
+      tools: [...new Set([...a.tools, ...(m.tools ?? [])])],
+    }),
+    { sessions: 0, tokensIn: 0, projects: 0, tools: [] },
+  );
+  const card = (scope, name, m, mono) => `
+    <div class="machine-card${machineScope === scope ? " active" : ""}" data-machine="${esc(scope)}"
+         title="点击只看${esc(name)}的数据">
+      <div class="mname"><span class="dot"></span><span class="label">${esc(name)}</span></div>
+      <div class="mstats"><b>${fmt(m.sessions)}</b> 会话 · <b>${fmt(m.projects)}</b> 项目 · <b>${fmt(m.tokensIn)}</b> tok</div>
+      ${mono ? `<div class="mtools">${mono}</div>` : ""}
+    </div>`;
+  const chips = (tools) =>
+    tools.slice(0, 4).map((t) => `<span class="chip">${esc(t)}</span>`).join("");
+  $("machine-cards").innerHTML =
+    card("", "全部机器", all, chips(all.tools)) +
+    lastMachines
+      .map((m) =>
+        card(m.machine, m.machine === "local" ? "本机" : m.machine, m, chips(m.tools ?? [])),
+      )
+      .join("");
+  document.querySelectorAll(".machine-card").forEach((c) => {
+    c.onclick = () => setMachineScope(c.dataset.machine ?? "");
+  });
+}
+
+function setMachineScope(scope) {
+  if (machineScope === scope) return;
+  machineScope = scope;
+  sessionsQuery.machine = scope;
   sessionsQuery.offset = 0;
+  renderMachineCards();
   loadData().catch(() => {});
   loadSessions();
-};
+}
 
 async function loadData() {
   const qs = machineScope ? `?machine=${encodeURIComponent(machineScope)}` : "";
@@ -199,6 +242,7 @@ async function runScan() {
       ? `扫描完成 · ${(sum.durationMs / 1000).toFixed(1)}s · ${sum.tools.filter((t) => t.sessions > 0).length} 个数据源 · 共 ${sum.tools.reduce((s2, t) => s2 + t.sessions, 0)} 会话`
       : `扫描失败：${done?.error ?? "未知错误"}`;
     await loadData();
+    await loadMachines();
   } catch (e) {
     $("toast-spin").style.display = "none";
     $("toast-msg").textContent = "引擎未响应，请重启应用";
@@ -336,13 +380,7 @@ async function loadSessions() {
 }
 
 function fillFilterSelects(sources) {
-  // Machine options fill the global hero switch (isolation scope); the
-  // session card keeps only the tool filter.
-  const machineSel = $("machine-switch");
-  const machinePrev = machineSel.value;
-  const machines = [...new Set(sources.map(machineOf).filter(Boolean))].sort();
-  machineSel.innerHTML = `<option value="">全部机器</option><option value="local">本机</option>` +
-    machines.map((m) => `<option value="${esc(m)}"${m === machinePrev ? " selected" : ""}>${esc(m)}</option>`).join("");
+  // Machine scoping lives in the machine cards; this select filters by tool.
   const toolSel = $("session-source");
   const toolPrev = toolSel.value;
   const tools = [...new Set(sources.map(baseTool))].sort();
@@ -629,6 +667,7 @@ if (hasTauriBridge) {
 (async function boot() {
   const online = await checkEngine();
   if (online) {
+    loadMachines();
     loadData().catch(() => {});
     loadRemotes();
     loadSessions();
@@ -643,7 +682,11 @@ if (hasTauriBridge) {
   }
 })();
 setInterval(checkEngine, 5000);
-setInterval(loadData, 30000);
+setInterval(() => {
+  if (!engineOnline) return;
+  loadData().catch(() => {});
+  loadMachines();
+}, 30000);
 setInterval(() => { if (engineOnline) loadRemotes(); }, 3000);
 // Sessions refresh: skip the list while the user is typing in the search box;
 // live-update the open detail view so an actively-growing session stays fresh.

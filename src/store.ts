@@ -234,6 +234,28 @@ export class Store {
     return rows.map((r) => r.source);
   }
 
+  /**
+   * Per-machine aggregate rows for the machine cards. Machine identity is
+   * derived from source ("tool@machine"; no "@" = local).
+   */
+  machineSummaries(): MachineSummary[] {
+    return this.db
+      .prepare(
+        `SELECT CASE WHEN instr(source, '@') = 0 THEN 'local'
+                     ELSE substr(source, instr(source, '@') + 1) END AS machine,
+                COUNT(*) AS sessions,
+                COUNT(DISTINCT project_path) AS projects,
+                SUM(rounds) AS rounds,
+                SUM(tokens_in) AS tokensIn,
+                SUM(tokens_out) AS tokensOut,
+                SUM(additions) AS additions,
+                SUM(deletions) AS deletions
+           FROM sessions GROUP BY machine
+           ORDER BY (machine = 'local') DESC, sessions DESC`,
+      )
+      .all() as MachineSummary[];
+  }
+
   getSession(source: string, id: string): NirSession | null {
     const row = this.db
       .prepare("SELECT raw FROM sessions WHERE source = ? AND id = ?")
@@ -293,6 +315,17 @@ export interface SessionSummary {
 
 export interface StoredSession extends SessionSummary {
   raw: string;
+}
+
+export interface MachineSummary {
+  machine: string;
+  sessions: number;
+  projects: number;
+  rounds: number;
+  tokensIn: number;
+  tokensOut: number;
+  additions: number;
+  deletions: number;
 }
 
 export function defaultStorePath(): string {

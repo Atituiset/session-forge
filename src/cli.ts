@@ -495,6 +495,24 @@ program
         const machine = url.searchParams.get("machine");
         return Response.json(buildDashboardData(store, machine || undefined));
       }
+      if (url.pathname === "/api/machines") {
+        // Per-machine cards: aggregates grouped SQL-side, tool chips derived
+        // from distinct sources ("codex@devbox" → machine devbox, tool codex).
+        const toolsByMachine = new Map<string, Set<string>>();
+        for (const s of store.distinctSources()) {
+          const at = s.indexOf("@");
+          const machine = at < 0 ? "local" : s.slice(at + 1);
+          const tool = at < 0 ? s : s.slice(0, at);
+          if (!toolsByMachine.has(machine)) toolsByMachine.set(machine, new Set());
+          toolsByMachine.get(machine)?.add(tool);
+        }
+        return Response.json({
+          machines: store.machineSummaries().map((m) => ({
+            ...m,
+            tools: [...(toolsByMachine.get(m.machine) ?? [])].sort(),
+          })),
+        });
+      }
       if (url.pathname === "/api/sessions" && req.method === "GET") {
         const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
         const offset = Math.max(Number(url.searchParams.get("offset")) || 0, 0);
