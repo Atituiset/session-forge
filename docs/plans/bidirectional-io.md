@@ -48,3 +48,25 @@
 - 加密类 session（如 Cursor 云同步数据）不计划支持
 - 不尝试还原 thinking/reasoning 内容
 - 不做实时双向同步（只做显式 convert/import）
+
+## 6. 接力 / Projection（IO-06，已实现）
+
+直通场景：“某家 token/额度耗尽 → 换一个 CLI 继续同一任务”。`convert` 只产出文件目录，接力将其
+推进为**投影即安装**——直接写入目标 CLI 的原生存储并给出 resume 指引：
+
+- 新模块 `src/relay.ts`：`relaySession(session, target)` 复用现有 writer，把产物写入目标工具的
+  home（`~/.codex` / `~/.kimi-code` / `~/.deepseek` / `~/.claude`），并在结尾追加一条接力说明
+  消息（`--no-note` 可关）；Claude 目标会把非 UUID 的会话 id 重铸为 UUID（`claude --resume`
+  按 `<uuid>.jsonl` 定位）。
+- 目标支持：**codex / kimi-code / deepseek**（同一 rollout 布局，一个 writer 覆盖）、
+  **claude-code**。刻意不含：opencode（SQLite 直写有锁库风险）、codewhale（`*.json` 非
+  rollout 布局，需独立 writer）、antigravity（Protobuf）。
+- 入口：
+  - CLI：`session-forge relay <session> --to <tool> [--force] [--no-note]`
+  - Engine：`POST /api/relay {source, id, to, force?}`（远程机器会话返回 400，需在本机操作）
+  - 面板：会话详情头部出现「接力 →」选择器，成功后展示 resume 提示
+- 覆盖保护：同目标已投影过时拒绝，`--force` 显式覆盖。
+- 测试/桌面沙盒：引擎可用 `SESSION_FORGE_RELAY_HOME` 重定向投影落点（CI 不污染真实 home）。
+
+局限与后续：跨机器接力（把远端会话投影到本机或反向）未做；opencode 作为**目标**待 SQLite
+写入方案后再评估（作为来源已支持）。

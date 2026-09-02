@@ -87,6 +87,12 @@
   .livepill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor;
     animation: pulse 2s infinite; box-shadow: 0 0 8px currentColor; }
   @keyframes pulse { 50% { opacity: .35 } }
+  .machine-switch {
+    background: rgba(10,15,29,.85); border: 1px solid var(--line); border-radius: 99px;
+    color: var(--txt); padding: 6px 12px; font-family: var(--mono); font-size: 11.5px;
+    outline: none; cursor: pointer; transition: border-color .15s;
+  }
+  .machine-switch:hover, .machine-switch:focus { border-color: rgba(34,211,238,.55); }
   .hero-actions { margin-left: auto; display: flex; gap: 10px; }
   button.act {
     display: inline-flex; align-items: center; gap: 8px;
@@ -269,6 +275,22 @@
   .sess-head .stats { font-family: var(--mono); font-size: 11px; color: var(--dim); }
   .sess-head .stats b { color: var(--cyan); font-weight: 500; }
   .sess-close { margin-left: auto; }
+  .relay-box { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+  .relay-box select {
+    background: rgba(10,15,29,.85); border: 1px solid var(--line); border-radius: 6px;
+    color: var(--txt); padding: 4px 8px; font-family: var(--mono); font-size: 11px;
+    outline: none; cursor: pointer;
+  }
+  .relay-box select:focus { border-color: rgba(34,211,238,.55); }
+  .relay-result { display: none; margin: -6px 0 12px; padding: 9px 12px; border-radius: 9px;
+    font-size: 12px; font-family: var(--mono); line-height: 1.7;
+    border: 1px solid var(--line); background: rgba(14,21,38,.5); color: var(--dim); }
+  .relay-result.show { display: block; }
+  .relay-result.ok { border-color: rgba(52,211,153,.4); color: var(--green); }
+  .relay-result.err { border-color: rgba(251,113,133,.4); color: var(--red); }
+  .relay-result .relay-cmd { color: var(--cyan); user-select: all; }
+  /* relay action sits left of the close button */
+  .relay-box + .sess-close { margin-left: 0; }
   .msg { border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px;
     margin-bottom: 10px; font-size: 13px; line-height: 1.6; }
   .msg .who { font-family: var(--mono); font-size: 10px; letter-spacing: 1.2px;
@@ -335,6 +357,10 @@
       认知资产面板
     </h1>
     <span class="livepill" id="engine-pill"><i></i><span id="engine-pill-text">检测引擎…</span></span>
+    <select class="machine-switch" id="machine-switch" title="看板与会话列表的数据范围（按机器隔离）">
+      <option value="">全部机器</option>
+      <option value="local">本机</option>
+    </select>
     <div class="hero-actions">
       <button class="act primary" id="btn-scan" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3.4"/></svg>
@@ -362,7 +388,6 @@
       <div class="card">
         <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>会话浏览 <span class="count-pill" id="session-count"></span></h2>
         <div class="session-tools">
-          <select id="session-machine"><option value="">全部机器</option></select>
           <select id="session-source"><option value="">全部工具</option></select>
           <input id="session-search" placeholder="搜索项目或会话 id…" />
         </div>

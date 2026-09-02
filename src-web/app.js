@@ -65,8 +65,20 @@ async function checkEngine() {
   }
 }
 
+/* ── 全局机器范围：看板与会话浏览共用，实现多机切换/隔离 ── */
+let machineScope = "";
+
+$("machine-switch").onchange = () => {
+  machineScope = $("machine-switch").value;
+  sessionsQuery.machine = machineScope;
+  sessionsQuery.offset = 0;
+  loadData().catch(() => {});
+  loadSessions();
+};
+
 async function loadData() {
-  const d = await (await fetch(`${API}/api/data`)).json();
+  const qs = machineScope ? `?machine=${encodeURIComponent(machineScope)}` : "";
+  const d = await (await fetch(`${API}/api/data${qs}`)).json();
   render(d);
 }
 
@@ -113,7 +125,8 @@ function render(d) {
        <td class="num flame" style="text-align:right;font-family:var(--mono);color:var(--amber)">${b.rounds} ⟳</td></tr>`
     ).join("");
 
-  $("foot").textContent = `SESSIONFORGE ENGINE · ${d.generatedAt.replace("T", " ").slice(0, 19)} · 本地数据 · 未联网`;
+  const scopeLabel = machineScope ? (machineScope === "local" ? "本机" : machineScope) : "全部机器";
+  $("foot").textContent = `SESSIONFORGE ENGINE · ${d.generatedAt.replace("T", " ").slice(0, 19)} · 范围: ${scopeLabel} · 未联网`;
 }
 
 function renderDonut(models) {
@@ -323,7 +336,9 @@ async function loadSessions() {
 }
 
 function fillFilterSelects(sources) {
-  const machineSel = $("session-machine");
+  // Machine options fill the global hero switch (isolation scope); the
+  // session card keeps only the tool filter.
+  const machineSel = $("machine-switch");
   const machinePrev = machineSel.value;
   const machines = [...new Set(sources.map(machineOf).filter(Boolean))].sort();
   machineSel.innerHTML = `<option value="">全部机器</option><option value="local">本机</option>` +
@@ -409,11 +424,28 @@ async function refreshSessionDetail() {
   try {
     const res = await fetch(`${API}/api/session?source=${encodeURIComponent(source)}&id=${encodeURIComponent(id)}`);
     if (res.status === 404) { closeSessionDetail(); return; }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const j = await res.json();
     // The user may have closed or switched sessions while fetching.
     if (!openSession || openSession.source !== source || openSession.id !== id) return;
     renderSessionDetail(j);
-  } catch {}
+  } catch (e) {
+    if (!openSession || openSession.source !== source || openSession.id !== id) return;
+    renderSessionDetailError(e);
+  }
+}
+
+function renderSessionDetailError(err) {
+  const panel = $("session-detail");
+  // Only replace the initial spinner — a transient failure during the 15s
+  // live-refresh must not wipe an already-rendered conversation.
+  if (!panel.querySelector(".spinner")) return;
+  panel.innerHTML = `<div class="sess-head">
+    <span style="color:var(--red)">会话加载失败：${esc(err?.message ?? String(err))}</span>
+    <button class="mini-btn sess-close" type="button" id="session-close">关闭 ✕</button>
+  </div>
+  <div class="remote-empty">关闭后重试 · 若持续失败请检查引擎日志 ~/.session-forge/engine.log</div>`;
+  $("session-close").onclick = closeSessionDetail;
 }
 
 function closeSessionDetail() {
@@ -456,8 +488,31 @@ function renderMsg(m) {
   </div>`;
 }
 
+/* ── 接力（projection）：把会话投影进另一个 CLI 的原生存储以继续工作 ── */
+const RELAY_TARGETS = [
+  { id: "codex", label: "Codex CLI" },
+  { id: "kimi-code", label: "Kimi Code" },
+  { id: "deepseek", label: "DeepSeek CLI" },
+  { id: "claude-code", label: "Claude Code" },
+];
+
+function relayControlsHtml(j) {
+  // Remote sessions can only be relayed on the machine they live on.
+  if (machineOf(j.source)) return "";
+  const options = RELAY_TARGETS.filter((t) => t.id !== baseTool(j.source))
+    .map((t) => `<option value="${esc(t.id)}">${esc(t.label)}</option>`)
+    .join("");
+  if (!options) return "";
+  return `<span class="relay-box" title="把本会话投影进另一个 CLI，token 用完后换工具继续">
+    <select id="relay-target">${options}</select>
+    <button class="mini-btn" id="btn-relay" type="button">接力 →</button>
+  </span>`;
+}
+
 function renderSessionDetail(j) {
-  const row = lastSessionRows.find((s) => s.source === j.source && s.id === j.id);
+  const row = (lastSessionsPayload?.sessions ?? []).find(
+    (s) => s.source === j.source && s.id === j.id,
+  );
   const stats = row
     ? `<b>${fmt(row.tokensIn)}</b> in · <b>${fmt(row.tokensOut)}</b> out · <b>${row.rounds}</b> 轮`
     : `<b>${(j.messages ?? []).length}</b> 条消息`;
@@ -465,14 +520,65 @@ function renderSessionDetail(j) {
     <span class="chip">${esc(j.source)}</span>
     <span class="proj" title="${esc(j.projectPath || j.id)}">${esc(short(j.projectPath || j.id, 56))}</span>
     <span class="stats">${fmtTime(j.startedAt)}${j.endedAt ? ` → ${fmtTime(j.endedAt)}` : ""} · ${stats}</span>
+    ${relayControlsHtml(j)}
     <button class="mini-btn sess-close" type="button" id="session-close">关闭 ✕</button>
   </div>`;
+  const relay = openSession?.relayResult ?? "";
   const body = (j.messages ?? []).map(renderMsg).join("") || `<div class="remote-empty">此会话没有消息</div>`;
   const panel = $("session-detail");
   const st = panel.scrollTop;
-  panel.innerHTML = head + body;
+  panel.innerHTML = `${head}<div class="relay-result" id="relay-result">${relay}</div>${body}`;
   panel.scrollTop = st;
   $("session-close").onclick = closeSessionDetail;
+  if (relay) {
+    const box = $("relay-result");
+    box.classList.add("show", ...(openSession.relayFailed ? ["err"] : ["ok"]));
+  }
+  const relayBtn = $("btn-relay");
+  if (relayBtn) {
+    relayBtn.onclick = () => runRelay(j);
+  }
+}
+
+async function runRelay(j) {
+  const to = $("relay-target")?.value;
+  const box = $("relay-result");
+  if (!to || !box) return;
+  const btn = $("btn-relay");
+  if (btn) btn.disabled = true;
+  box.className = "relay-result show";
+  box.textContent = "正在接力…";
+  // The 15s live refresh re-renders the detail panel and can detach our
+  // cached nodes mid-request — always re-acquire by id when finishing.
+  const finish = (html, failed) => {
+    if (openSession) {
+      openSession.relayResult = html;
+      openSession.relayFailed = failed;
+    }
+    const liveBox = $("relay-result");
+    if (liveBox) {
+      liveBox.className = `relay-result show ${failed ? "err" : "ok"}`;
+      liveBox.innerHTML = html;
+    }
+    const liveBtn = $("btn-relay");
+    if (liveBtn) liveBtn.disabled = false;
+  };
+  try {
+    const res = await fetch(`${API}/api/relay`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source: j.source, id: j.id, to }),
+    });
+    const r = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(r.error ?? `HTTP ${res.status}`);
+    finish(
+      `✓ 已接力到 <b>${esc(to)}</b> · ${r.messagesConverted} 条消息<br>` +
+        `<span class="relay-cmd">继续工作：${esc(r.resumeHint ?? "")}</span>`,
+      false,
+    );
+  } catch (e) {
+    finish(`接力失败：${esc(e?.message ?? String(e))}`, true);
+  }
 }
 
 let searchTimer = null;
@@ -486,11 +592,6 @@ $("session-search").addEventListener("input", () => {
 });
 $("session-source").onchange = () => {
   sessionsQuery.source = $("session-source").value;
-  sessionsQuery.offset = 0;
-  loadSessions();
-};
-$("session-machine").onchange = () => {
-  sessionsQuery.machine = $("session-machine").value;
   sessionsQuery.offset = 0;
   loadSessions();
 };

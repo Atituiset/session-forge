@@ -28,6 +28,8 @@ test.beforeAll(async () => {
       ...process.env,
       SESSION_FORGE_TEST_FIXTURES: path.resolve(here, "fixtures-ui"),
       SESSION_FORGE_HOME: dbDir,
+      // Relay writes land in a sandbox, never the runner's real ~/.codex etc.
+      SESSION_FORGE_RELAY_HOME: path.join(dbDir, "relay-home"),
     },
   });
   // Wait for health.
@@ -250,5 +252,124 @@ test.describe("export button", () => {
     const body = await popup.textContent("body");
     const parsed = JSON.parse(body ?? "{}");
     expect(parsed.totals).toBeDefined();
+  });
+});
+
+// Seed sessions deterministically via the API, so describes that need session
+// data stay self-sufficient even when run standalone (playwright --grep).
+async function ensureScanned(): Promise<void> {
+  const st0 = (await (await fetch(`${API}/api/scan/status`)).json()) as { status?: string };
+  if (st0.status !== "running") await fetch(`${API}/api/scan`, { method: "POST" });
+  for (let i = 0; i < 90; i++) {
+    const st = (await (await fetch(`${API}/api/scan/status`)).json()) as { status?: string };
+    if (st.status === "ok") return;
+    if (st.status && st.status !== "running") throw new Error(`scan failed: ${st.status}`);
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error("scan did not finish");
+}
+
+test.describe("session detail", () => {
+  test.beforeAll(ensureScanned);
+
+  // Regression: a leftover `lastSessionRows` reference threw inside the
+  // detail renderer and the silent catch left the spinner up forever.
+  test("clicking a session opens its messages (not a stuck spinner)", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    await page.goto(PANEL);
+    const row = page.locator(".session-row").first();
+    await expect(row).toBeVisible({ timeout: 15_000 });
+    await row.click();
+    await expect(page.locator("#session-overlay.show")).toBeVisible();
+    await expect(page.locator("#session-detail .msg").first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator("#session-detail .spinner")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe("machine scope", () => {
+  test.beforeAll(ensureScanned);
+
+  test("/api/data?machine= scopes aggregates; unknown machine yields zero", async () => {
+    const all = (await (await fetch(`${API}/api/data`)).json()) as {
+      machine: string;
+      totals: { sessions: number };
+    };
+    const local = (await (await fetch(`${API}/api/data?machine=local`)).json()) as {
+      machine: string;
+      totals: { sessions: number };
+    };
+    const none = (await (await fetch(`${API}/api/data?machine=ghost-machine`)).json()) as {
+      totals: { sessions: number };
+    };
+    expect(all.machine).toBe("all");
+    expect(local.machine).toBe("local");
+    // The seeded fixtures are all local, so scoping to local loses nothing…
+    expect(local.totals.sessions).toBe(all.totals.sessions);
+    // …while an unknown machine isolates to zero.
+    expect(none.totals.sessions).toBe(0);
+  });
+
+  test("hero machine switch exists and scopes the dashboard", async ({ page }) => {
+    await page.goto(PANEL);
+    const sw = page.locator("#machine-switch");
+    await expect(sw).toBeVisible();
+    await expect(sw.locator("option")).toHaveCount(2); // 全部机器 + 本机
+    await page.waitForTimeout(1200);
+    const before = (await page.locator(".metric .value").first().textContent()) ?? "";
+    await sw.selectOption("local");
+    await page.waitForTimeout(800);
+    const after = (await page.locator(".metric .value").first().textContent()) ?? "";
+    // Fixtures are all-local: scoping to "本机" keeps the same totals.
+    expect(after).toBe(before);
+  });
+});
+
+test.describe("relay (projection to another CLI)", () => {
+  test.beforeAll(ensureScanned);
+
+  test("claude-code session relays to codex and shows the resume hint", async ({ page }) => {
+    const fs = await import("node:fs");
+    await page.goto(PANEL);
+    const row = page.locator(".session-row", { hasText: "claude-code" }).first();
+    await expect(row).toBeVisible({ timeout: 15_000 });
+    await row.click();
+    const btn = page.locator("#btn-relay");
+    await expect(btn).toBeVisible({ timeout: 10_000 });
+    await page.selectOption("#relay-target", "codex");
+    await btn.click();
+    const result = page.locator("#relay-result");
+    await expect(result).toContainText("已接力到", { timeout: 10_000 });
+    await expect(result).toContainText("codex resume");
+    // The rollout file actually landed in the sandboxed relay home.
+    const root = path.join(dbDir, "relay-home", ".codex", "sessions");
+    const walk = (d: string): string[] =>
+      fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => {
+        const p = path.join(d, e.name);
+        return e.isDirectory() ? walk(p) : [p];
+      });
+    const files = walk(root);
+    expect(files.some((f) => f.endsWith(".jsonl"))).toBe(true);
+    const content = fs.readFileSync(files.find((f) => f.endsWith(".jsonl")) ?? "", "utf8");
+    expect(content).toContain("session_meta");
+  });
+
+  test("relay result survives the 15s live refresh", async ({ page }) => {
+    test.setTimeout(60_000);
+    await page.goto(PANEL);
+    const row = page.locator(".session-row", { hasText: "claude-code" }).first();
+    await row.click();
+    await expect(page.locator("#btn-relay")).toBeVisible({ timeout: 10_000 });
+    // The session's own tool (claude-code) is excluded from the target list.
+    await expect(page.locator("#relay-target option[value='claude-code']")).toHaveCount(0);
+    // Use a different target than the sibling test so they never collide on
+    // the "already relayed" overwrite guard regardless of execution order.
+    await page.selectOption("#relay-target", "kimi-code");
+    await page.click("#btn-relay");
+    await expect(page.locator("#relay-result")).toContainText("已接力到", { timeout: 10_000 });
+    // Force a live refresh of the open detail view.
+    await page.waitForTimeout(16_000);
+    await expect(page.locator("#relay-result")).toContainText("已接力到");
   });
 });

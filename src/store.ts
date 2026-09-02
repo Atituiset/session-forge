@@ -159,18 +159,27 @@ export class Store {
   }
 
   // Statistics-only variant: skips the potentially huge raw JSON column.
-  listSessions(): SessionSummary[] {
-    return this.selectSessions("NULL AS raw");
+  // `machine` scopes the dashboard to one machine ("local" | remote name).
+  listSessions(opts?: { machine?: string }): SessionSummary[] {
+    const where: string[] = [];
+    const params: string[] = [];
+    if (opts?.machine) applyMachineFilter(opts.machine, where, params);
+    return this.selectSessions("NULL AS raw", where, params);
   }
 
-  private selectSessions(rawExpr: string): SessionSummary[] {
+  private selectSessions(
+    rawExpr: string,
+    where: string[] = [],
+    params: string[] = [],
+  ): SessionSummary[] {
+    const whereSql = where.length > 0 ? ` WHERE ${where.join(" AND ")}` : "";
     return this.db
       .prepare(
         `SELECT source, id, project_path AS projectPath, started_at AS startedAt, ended_at AS endedAt,` +
           ` model, tokens_in AS tokensIn, tokens_out AS tokensOut, token_source AS tokenSource, cost, rounds,` +
-          ` files_json AS filesJson, additions, deletions, has_error AS hasError, tags AS tagsJson, ${rawExpr} FROM sessions`,
+          ` files_json AS filesJson, additions, deletions, has_error AS hasError, tags AS tagsJson, ${rawExpr} FROM sessions${whereSql}`,
       )
-      .all() as SessionSummary[];
+      .all(...params) as SessionSummary[];
   }
 
   listSessionsPage(opts: {
@@ -192,15 +201,7 @@ export class Store {
       where.push("(source = ? OR source LIKE ? ESCAPE '\\')");
       params.push(opts.source, `${tool}@%`);
     }
-    if (opts.machine === "local") {
-      // Local rows never carry an @host suffix.
-      where.push("source NOT LIKE '%@%'");
-    } else if (opts.machine) {
-      // Remote rows look like "tool@host" (host itself may contain @).
-      const machine = opts.machine.replace(/([%_\\])/g, "\\$1");
-      where.push("source LIKE ? ESCAPE '\\'");
-      params.push(`%@${machine}`);
-    }
+    if (opts.machine) applyMachineFilter(opts.machine, where, params);
     if (opts.q) {
       // Escape LIKE wildcards so a query like "a%b" matches literally.
       const pattern = opts.q.replace(/([%_\\])/g, "\\$1");
@@ -253,6 +254,20 @@ export class Store {
 
   close(): void {
     this.db.close();
+  }
+}
+
+// Machine identity is suffix-encoded into source as "tool@machine"; local
+// rows never carry an @host suffix. Shared by listSessions (dashboard) and
+// listSessionsPage (session browser) so a machine switch isolates both.
+function applyMachineFilter(machine: string, where: string[], params: string[]): void {
+  if (machine === "local") {
+    where.push("source NOT LIKE '%@%'");
+  } else {
+    // Remote rows look like "tool@host" (host itself may contain @).
+    const m = machine.replace(/([%_\\])/g, "\\$1");
+    where.push("source LIKE ? ESCAPE '\\'");
+    params.push(`%@${m}`);
   }
 }
 

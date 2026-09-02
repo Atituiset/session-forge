@@ -297,4 +297,41 @@ describe("store", () => {
     expect(store.distinctSources()).toEqual(["claude-code@ops@10.0.0.1", "codex", "codex@devbox"]);
     store.close();
   });
+
+  test("listSessions machine option scopes dashboard rows the same way", () => {
+    const store = new Store(path.join(dir, "cache-dash.db"));
+    const mk = (id: string, source: string): NirSession => ({
+      id,
+      source,
+      sourceVersion: null,
+      projectPath: "/p",
+      startedAt: "2026-08-01T00:00:00Z",
+      endedAt: null,
+      messages: [
+        {
+          role: "user",
+          content: "x",
+          timestamp: null,
+          toolName: null,
+          toolInput: null,
+          model: null,
+          thinking: null,
+        },
+      ],
+      rawMeta: {},
+    });
+    store.upsert(mk("l1", "codex"), "f", 1);
+    store.upsert(mk("l2", "claude-code"), "f", 1);
+    store.upsert(mk("r1", "codex@devbox"), "f", 1);
+    const ids = (machine?: string) =>
+      store
+        .listSessions(machine ? { machine } : undefined)
+        .map((s) => s.id)
+        .sort();
+    expect(ids()).toEqual(["l1", "l2", "r1"]);
+    expect(ids("local")).toEqual(["l1", "l2"]);
+    expect(ids("devbox")).toEqual(["r1"]);
+    expect(ids("nope")).toEqual([]);
+    store.close();
+  });
 });

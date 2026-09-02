@@ -18,6 +18,7 @@ import { llmClassify, ruleClassify } from "./llm_enrich/intent.ts";
 import { formatTokens, shortPath } from "./output/format.ts";
 import { renderKnowledgeBase } from "./output/markdown.ts";
 import { bar, renderTable } from "./output/terminal.ts";
+import { RELAY_TARGETS, relaySession } from "./relay.ts";
 import { filterNewHosts, parseSshConfigHosts, sshConfigPath } from "./ssh_config.ts";
 import type { SessionSummary } from "./store.ts";
 import { defaultStorePath, Store } from "./store.ts";
@@ -337,6 +338,55 @@ program
   });
 
 program
+  .command("relay")
+  .description(
+    "Project a session into another agent CLI's native storage so it can resume there" +
+      " (token-quota handover: continue the same task in a different tool)",
+  )
+  .argument("<session>", "session id (or unique prefix)")
+  .requiredOption("--to <tool>", `target cli: ${RELAY_TARGETS.map((t) => t.id).join(" | ")}`)
+  .option("--force", "overwrite an already-relayed file", false)
+  .option("--no-note", "do not append the relay handover note message")
+  .option("--db <path>", "cache database path", defaultStorePath())
+  .action(
+    async (sessionId: string, opts: { to: string; force: boolean; note: boolean; db: string }) => {
+      const store = new Store(opts.db);
+      try {
+        const session = store.findSession(sessionId);
+        if (!session) {
+          console.error(`Session not found: ${sessionId}`);
+          process.exitCode = 1;
+          return;
+        }
+        if (session.source.includes("@")) {
+          console.error("远程机器的会话暂不支持接力（需在那台机器上操作）。");
+          process.exitCode = 1;
+          return;
+        }
+        const result = relaySession(session, opts.to, {
+          force: opts.force,
+          withNote: opts.note,
+        });
+        for (const f of result.files) {
+          console.log(`installed ${f}`);
+        }
+        console.log(
+          `\ntarget: ${result.target} (fidelity ${result.fidelity}, ${result.messagesConverted} messages)`,
+        );
+        for (const note of result.notes.slice(0, 5)) {
+          console.log(`note: ${note}`);
+        }
+        console.log(`\n继续工作: ${result.resumeHint}`);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exitCode = 1;
+      } finally {
+        store.close();
+      }
+    },
+  );
+
+program
   .command("import")
   .description("Import an external agent session file into the store")
   .argument("<path>", "session file to import")
@@ -442,7 +492,8 @@ program
     const handleApi = async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
       if (url.pathname === "/api/data") {
-        return Response.json(buildDashboardData(store));
+        const machine = url.searchParams.get("machine");
+        return Response.json(buildDashboardData(store, machine || undefined));
       }
       if (url.pathname === "/api/sessions" && req.method === "GET") {
         const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
@@ -464,6 +515,34 @@ program
         const session = source && id ? store.getSession(source, id) : null;
         if (!session) return Response.json({ error: "not found" }, { status: 404 });
         return Response.json(session);
+      }
+      if (url.pathname === "/api/relay" && req.method === "POST") {
+        const body = (await req.json()) as {
+          source?: string;
+          id?: string;
+          to?: string;
+          force?: boolean;
+        };
+        if (!body.source || !body.id || !body.to) {
+          return Response.json({ error: "source, id and to are required" }, { status: 400 });
+        }
+        if (body.source.includes("@")) {
+          return Response.json(
+            { error: "远程机器的会话暂不支持接力（请在对应机器上操作）" },
+            { status: 400 },
+          );
+        }
+        const session = store.getSession(body.source, body.id);
+        if (!session) return Response.json({ error: "session not found" }, { status: 404 });
+        try {
+          const result = relaySession(session, body.to, { force: body.force === true });
+          return Response.json({ ok: true, ...result });
+        } catch (err) {
+          return Response.json(
+            { error: err instanceof Error ? err.message : String(err) },
+            { status: 400 },
+          );
+        }
       }
       if (url.pathname === "/api/scan" && req.method === "POST") {
         if (localJob?.status === "running") {
@@ -727,10 +806,11 @@ async function importSshConfigRemotes(): Promise<{ added: number; names: string[
   return { added: fresh.length, names: fresh.map((h) => h.name) };
 }
 
-function buildDashboardData(store: Store): Record<string, unknown> {
-  const rows = store.listSessions();
+function buildDashboardData(store: Store, machine?: string): Record<string, unknown> {
+  const rows = store.listSessions(machine ? { machine } : undefined);
   return {
     generatedAt: new Date().toISOString(),
+    machine: machine ?? "all",
     totals: totals(rows),
     projects: aggregateByProject(rows, 12),
     activity: aggregateByTime(rows, "day", 42),
