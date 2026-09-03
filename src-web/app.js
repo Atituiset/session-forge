@@ -2,7 +2,12 @@ const $ = (id) => document.getElementById(id);
 const fmt = (n) => n >= 1e9 ? `${(n / 1e9).toFixed(2)}G` : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const short = (s, n = 28) => s.length > n ? `…${s.slice(-n + 1)}` : s;
-const API = new URLSearchParams(location.search).get("api") ?? "http://127.0.0.1:4177";
+// Engine source: ?api= wins, then the last picked engine, then the bundled
+// sidecar default. Picked engines persist so the desktop app reopens on them.
+const API =
+  new URLSearchParams(location.search).get("api") ??
+  localStorage.getItem("sf.engine.api") ??
+  "http://127.0.0.1:4177";
 // NOTE: Tauri injects a non-configurable `window.isTauri` global — a
 // top-level `const isTauri` here would be a SyntaxError ("already declared")
 // and kill the whole script. Use a different name.
@@ -124,6 +129,100 @@ async function loadData() {
   const d = await (await fetch(`${API}/api/data${qs}`)).json();
   render(d);
 }
+
+/* ── 引擎源切换：本机引擎 / WSL 里自起的引擎 / 任何 HTTP 可达的引擎 ── */
+const ENGINE_LS_KEY = "sf.engines";
+
+function engineLabel(api) {
+  return api.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+}
+
+function knownEngines() {
+  try {
+    const list = JSON.parse(localStorage.getItem(ENGINE_LS_KEY) ?? "[]");
+    return Array.isArray(list) ? list.filter((e) => e && typeof e.api === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveEngines(list) {
+  localStorage.setItem(ENGINE_LS_KEY, JSON.stringify(list));
+}
+
+function renderEngineMenu() {
+  const list = knownEngines();
+  // The catalog may lack the API actually in use (e.g. panel opened with
+  // ?api= for a remote engine): show it as the first, marked current.
+  if (!list.some((e) => e.api === API)) {
+    list.unshift({ label: `当前连接 · ${engineLabel(API)}`, api: API });
+  }
+  if (!list.some((e) => e.api === "http://127.0.0.1:4177")) {
+    list.push({ label: "本机默认", api: "http://127.0.0.1:4177" });
+  }
+  const body = $("engine-pop-body");
+  body.innerHTML =
+    list
+      .map(
+        (e) => `<div class="engine-row row${e.api === API ? " cur" : ""}" data-api="${esc(e.api)}">
+          <span>${esc(e.label || engineLabel(e.api))}${e.api === API ? " · 当前" : ""}</span>
+          ${e.api === "http://127.0.0.1:4177" ? "" : `<span class="del" data-del="${esc(e.api)}" title="移除">✕</span>`}
+        </div>`,
+      )
+      .join("") +
+    `<div class="adder">
+      <input id="engine-add-label" placeholder="名字（如 WSL）" />
+      <input id="engine-add-api" placeholder="http://localhost:4178" />
+      <button class="mini-btn" id="engine-add-btn" type="button">添加</button>
+    </div>
+    <p class="hint">想看 WSL/WSL2 数据？在 WSL 里运行
+      <code>session-forge serve --port 4178</code>，再把 http://localhost:4178 加进来。</p>`;
+  body.querySelectorAll(".engine-row").forEach((row) => {
+    row.onclick = (ev) => {
+      ev.stopPropagation(); // keep the popover open across in-pop clicks
+      const del = ev.target.closest?.("[data-del]");
+      if (del) {
+        ev.stopPropagation();
+        saveEngines(knownEngines().filter((e) => e.api !== del.dataset.del));
+        renderEngineMenu();
+        return;
+      }
+      const api = row.dataset.api;
+      if (api && api !== API) {
+        localStorage.setItem("sf.engine.api", api);
+        // A ?api= override in the URL would otherwise win over the stored pick.
+        const url = new URL(location.href);
+        url.searchParams.delete("api");
+        location.href = url.toString();
+      }
+    };
+  });
+  $("engine-add-btn").onclick = (e) => {
+    // innerHTML rebuild in renderEngineMenu() detaches this button mid-click;
+    // stop propagation or the document-level outside-click handler would read
+    // the (now ancestorless) target as "outside" and close the popover.
+    e.stopPropagation();
+    const api = $("engine-add-api").value.trim().replace(/\/+$/, "");
+    if (!/^https?:\/\//.test(api)) return;
+    const label = $("engine-add-label").value.trim();
+    const list = knownEngines().filter((e) => e.api !== api);
+    list.push({ label: label || engineLabel(api), api });
+    saveEngines(list);
+    renderEngineMenu();
+  };
+}
+
+$("engine-chip-label").textContent = engineLabel(API);
+$("engine-chip").onclick = (e) => {
+  e.stopPropagation();
+  const pop = $("engine-pop");
+  if (pop.hasAttribute("open")) pop.removeAttribute("open");
+  else { renderEngineMenu(); pop.setAttribute("open", ""); }
+};
+document.addEventListener("click", (e) => {
+  const pop = $("engine-pop");
+  if (pop.hasAttribute("open") && !e.target.closest(".engine-menu")) pop.removeAttribute("open");
+});
 
 function render(d) {
   const t = d.totals;
@@ -547,7 +646,27 @@ function relayControlsHtml(j) {
   </span>`;
 }
 
+// Cheap change detector: the 15s live refresh must not re-render when the
+// session hasn't moved — a re-render collapses every open <details>
+// (thinking / tool payload) the user is reading.
+function sessionFingerprint(j) {
+  const msgs = j.messages ?? [];
+  const last = msgs[msgs.length - 1] ?? {};
+  return `${msgs.length}|${j.endedAt ?? ""}|${last.timestamp ?? ""}|${(last.content ?? "").length}`;
+}
+
 function renderSessionDetail(j) {
+  const panel = $("session-detail");
+  const fp = sessionFingerprint(j);
+  if (openSession?.renderFp === fp && panel.querySelector(".sess-head")) {
+    return; // unchanged since last render — leave the DOM (and open details) alone
+  }
+  // Preserve open <details> by ordinal across the re-render.
+  const openIdx = new Set(
+    [...panel.querySelectorAll("details")]
+      .map((d, i) => (d.open ? i : -1))
+      .filter((i) => i >= 0),
+  );
   const row = (lastSessionsPayload?.sessions ?? []).find(
     (s) => s.source === j.source && s.id === j.id,
   );
@@ -563,10 +682,13 @@ function renderSessionDetail(j) {
   </div>`;
   const relay = openSession?.relayResult ?? "";
   const body = (j.messages ?? []).map(renderMsg).join("") || `<div class="remote-empty">此会话没有消息</div>`;
-  const panel = $("session-detail");
   const st = panel.scrollTop;
   panel.innerHTML = `${head}<div class="relay-result" id="relay-result">${relay}</div>${body}`;
+  [...panel.querySelectorAll("details")].forEach((d, i) => {
+    if (openIdx.has(i)) d.open = true;
+  });
   panel.scrollTop = st;
+  if (openSession) openSession.renderFp = fp;
   $("session-close").onclick = closeSessionDetail;
   if (relay) {
     const box = $("relay-result");

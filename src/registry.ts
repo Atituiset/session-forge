@@ -21,6 +21,12 @@ export interface Candidate {
 export interface ResolveOptions {
   homeDir: string;
   wslHostUserDirs?: string[];
+  /**
+   * The reverse direction: engine runs on Windows and reaches INTO WSL
+   * distros via UNC (\\wsl.localhost\<distro>\home\<user>). Each entry's
+   * label becomes the machine suffix: `${toolId}@wsl-<distro>`.
+   */
+  wslGuestUserDirs?: { label: string; dir: string }[];
 }
 
 const everyPlatform = (patterns: string[]): Partial<Record<PlatformId, string[]>> => ({
@@ -95,6 +101,25 @@ function candidatesFor(spec: ToolSpec, platform: PlatformId, opts: ResolveOption
             pattern: `${dir}/${raw.slice(2)}`,
           });
         }
+      }
+    }
+  }
+  if (opts.wslGuestUserDirs) {
+    // WSL guests run the linux variants of every tool — reuse the linux
+    // path table against each distro user directory.
+    for (const { label, dir } of opts.wslGuestUserDirs) {
+      for (const raw of spec.paths.linux ?? []) {
+        if (!raw.startsWith("~/")) continue;
+        // SQLite over a UNC 9P share can't lock ("database is locked"), and
+        // snapshotting multi-GB opencode.db files destabilizes the Windows
+        // runtime. JSONL families over UNC are proven fine; opencode via
+        // this overlay is deferred — run the WSL-side engine instead.
+        if (spec.family === "opencode-sqlite") continue;
+        out.push({
+          toolId: `${spec.id}@${label}`,
+          family: spec.family,
+          pattern: `${dir}/${raw.slice(2)}`,
+        });
       }
     }
   }

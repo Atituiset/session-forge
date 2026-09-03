@@ -1,13 +1,56 @@
 import { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
+import { createReadStream, createWriteStream, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import type { NirMessage } from "../nir/schema.ts";
 import type { Transport } from "../transport/types.ts";
 import type { FileGroup, Reader, ScanEvent } from "./util.ts";
 import { buildSession, isoFromMs, makeMsg } from "./util.ts";
 
 const MAX_TEXT = 30_000;
+
+// Per-source-file snapshot bookkeeping (module scope: persists across scans
+// within one engine process).
+const dbSnapshots = new Map<string, { sig: string }>();
+
+async function signatureOf(transport: Transport, file: string): Promise<string | null> {
+  if (transport.kind === "local") {
+    try {
+      const st = statSync(file);
+      return `${st.size}:${Math.trunc(st.mtimeMs)}`;
+    } catch {
+      return null;
+    }
+  }
+  return null; // remote transports: no cheap stat — always re-copy
+}
+
+async function copyDbWithSidecars(transport: Transport, src: string, dest: string): Promise<void> {
+  if (transport.kind === "local") {
+    // UNC paths are directly fs-accessible for local transports — stream the
+    // copy. Buffering a 2.2 GB opencode.db in memory crashed the engine's
+    // Bun runtime outright (observed in the Windows→WSL overlay).
+    await pipeline(createReadStream(src), createWriteStream(dest));
+    for (const suffix of ["-wal", "-shm"]) {
+      try {
+        await pipeline(createReadStream(src + suffix), createWriteStream(dest + suffix));
+      } catch {
+        // sidecar absent — fine
+      }
+    }
+    return;
+  }
+  const bytes = await transport.readBinaryFile(src);
+  await Bun.write(dest, bytes);
+  for (const suffix of ["-wal", "-shm"]) {
+    try {
+      await Bun.write(dest + suffix, await transport.readBinaryFile(src + suffix));
+    } catch {
+      // sidecar absent — fine
+    }
+  }
+}
 
 interface SessionRow {
   id: string;
@@ -34,11 +77,20 @@ export class OpencodeSqliteReader implements Reader {
       let dbFile = file;
       let tempDir: string | null = null;
       try {
-        if (transport.kind !== "local") {
+        // Snapshot instead of opening in place when (a) the file is remote,
+        // or (b) it is a UNC path (\\wsl.localhost\…, reached by the Windows
+        // engine for WSL guests): SQLite needs working file locks, which 9P
+        // shares do not provide (observed: "database is locked").
+        if (transport.kind !== "local" || /^[\\/]{2}/.test(file)) {
+          // Change detection: these databases can be multi-GB; skip the copy
+          // when nothing moved since the last successful ingest.
+          const sig = await signatureOf(transport, file);
+          const prev = dbSnapshots.get(file);
+          if (prev && sig && prev.sig === sig) continue;
           tempDir = mkdtempSync(path.join(tmpdir(), "sf-remote-db-"));
           dbFile = path.join(tempDir, "snapshot.db");
-          const bytes = await transport.readBinaryFile(file);
-          await Bun.write(dbFile, bytes);
+          await copyDbWithSidecars(transport, file, dbFile);
+          if (sig) dbSnapshots.set(file, { sig });
         }
         const db = new Database(dbFile, { readonly: true });
         try {
@@ -49,13 +101,30 @@ export class OpencodeSqliteReader implements Reader {
       } catch (err) {
         yield { kind: "issue", path: file, error: String(err) };
       } finally {
-        if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+        if (tempDir) {
+          // Windows keeps the snapshot file locked briefly after db.close()
+          // (SQLite mmap teardown) — rmSync then fails EBUSY, and a throw here
+          // would mask any earlier error and abort the whole scan. Retry, then
+          // leave the temp dir for the OS rather than poison the ingest.
+          for (let i = 0; i < 3; i++) {
+            try {
+              rmSync(tempDir, { recursive: true, force: true });
+              break;
+            } catch {
+              if (i < 2) await new Promise((r) => setTimeout(r, 150 * (i + 1)));
+            }
+          }
+        }
       }
     }
   }
 }
 
 function* scanDb(db: Database, file: string, toolId: string): Generator<ScanEvent> {
+  // Stream per-session instead of preloading every message+part into maps:
+  // real databases reach multiple GB and the old Map-based accumulation
+  // pushed the Bun runtime past its limits (observed: segfault at ~1.7 GB
+  // RSS ingesting a 2.2 GB opencode.db snapshot).
   const sessions = db
     .prepare(
       `SELECT s.id, s.directory, s.title, s.version, s.summary_additions, s.summary_deletions,
@@ -64,28 +133,15 @@ function* scanDb(db: Database, file: string, toolId: string): Generator<ScanEven
        FROM session s LEFT JOIN project p ON p.id = s.project_id`,
     )
     .all() as SessionRow[];
-
-  const msgsBySession = new Map<string, { id: string; data: string; time_created: number }[]>();
-  for (const r of db
-    .prepare("SELECT id, session_id AS sid, data, time_created FROM message ORDER BY time_created")
-    .all() as { id: string; sid: string; data: string; time_created: number }[]) {
-    const list = msgsBySession.get(r.sid) ?? [];
-    list.push({ id: r.id, data: r.data, time_created: r.time_created });
-    msgsBySession.set(r.sid, list);
-  }
-  const partsByMessage = new Map<string, { data: string }[]>();
-  for (const r of db
-    .prepare("SELECT data, message_id AS mid FROM part ORDER BY time_created")
-    .all() as { data: string; mid: string }[]) {
-    const list = partsByMessage.get(r.mid) ?? [];
-    list.push({ data: r.data });
-    partsByMessage.set(r.mid, list);
-  }
+  const msgStmt = db.prepare(
+    "SELECT id, data, time_created FROM message WHERE session_id = ? ORDER BY time_created",
+  );
+  const partStmt = db.prepare("SELECT data FROM part WHERE message_id = ? ORDER BY time_created");
 
   for (const row of sessions) {
     const messages: NirMessage[] = [];
     const patchFiles = new Set<string>();
-    const msgRows = msgsBySession.get(row.id) ?? [];
+    const msgRows = msgStmt.all(row.id) as { id: string; data: string; time_created: number }[];
     let model = row.model;
 
     for (const mr of msgRows) {
@@ -109,7 +165,7 @@ function* scanDb(db: Database, file: string, toolId: string): Generator<ScanEven
       const tokensRaw = extractOpencodeTokens(md.tokens);
 
       let textContent = "";
-      const partRows = partsByMessage.get(mr.id) ?? [];
+      const partRows = partStmt.all(mr.id) as { data: string }[];
       for (const pr of partRows) {
         let pd: Record<string, unknown>;
         try {

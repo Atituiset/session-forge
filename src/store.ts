@@ -137,12 +137,16 @@ export class Store {
     if (stale.length === 0) return 0;
     let deleted = 0;
     this.transaction(() => {
-      const del = this.db.prepare(
-        `DELETE FROM sessions WHERE source = ? AND id IN (${stale.map(() => "?").join(",")})`,
-      );
-      // Chunk to stay well under SQLITE_MAX_VARIABLE_NUMBER.
+      // Chunk to stay well under SQLITE_MAX_VARIABLE_NUMBER. The statement
+      // must be prepared PER CHUNK — one shared statement would demand
+      // stale.length bindings on every run (observed: scan abort with
+      // "expected 1177 values, received 501").
       for (let i = 0; i < stale.length; i += 500) {
-        deleted += del.run(source, ...stale.slice(i, i + 500)).changes;
+        const chunk = stale.slice(i, i + 500);
+        const del = this.db.prepare(
+          `DELETE FROM sessions WHERE source = ? AND id IN (${chunk.map(() => "?").join(",")})`,
+        );
+        deleted += del.run(source, ...chunk).changes;
       }
     });
     return deleted;

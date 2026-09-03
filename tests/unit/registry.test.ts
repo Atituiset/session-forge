@@ -37,6 +37,23 @@ describe("registry", () => {
     ).toBe(true);
   });
 
+  test("wsl guest overlay emits @wsl-<distro> candidates with linux paths", () => {
+    const candidates = resolveCandidates("win32", {
+      homeDir: "C:\\Users\\tester",
+      wslGuestUserDirs: [{ label: "wsl-Ubuntu", dir: "//wsl.localhost/Ubuntu/home/atituiset" }],
+    });
+    const guest = candidates.filter((c) => c.toolId.endsWith("@wsl-Ubuntu"));
+    expect(guest.length).toBeGreaterThan(0);
+    expect(
+      guest.some(
+        (c) => c.pattern === "//wsl.localhost/Ubuntu/home/atituiset/.claude/projects/*/*.jsonl",
+      ),
+    ).toBe(true);
+    // opencode (SQLite) is intentionally skipped over UNC: file locking does
+    // not work on 9P shares and multi-GB snapshots destabilize the runtime.
+    expect(guest.some((c) => c.family === "opencode-sqlite")).toBe(false);
+  });
+
   test("every tool spec declares at least one linux path", () => {
     for (const spec of TOOLS) {
       expect(spec.paths.linux?.length ?? 0).toBeGreaterThan(0);

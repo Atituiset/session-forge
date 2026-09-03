@@ -286,6 +286,20 @@ test.describe("session detail", () => {
     await expect(page.locator("#session-detail .spinner")).toHaveCount(0);
     expect(errors).toEqual([]);
   });
+
+  test("open thinking/tool details survive the 15s live refresh", async ({ page }) => {
+    test.setTimeout(60_000);
+    await page.goto(PANEL);
+    await page.locator(".session-row", { hasText: "claude-code" }).first().click();
+    const details = page.locator("#session-detail .msg details").first();
+    await expect(details).toBeVisible({ timeout: 10_000 });
+    await expect(details).toHaveJSProperty("open", false);
+    await details.locator("summary").click();
+    await expect(details).toHaveJSProperty("open", true);
+    // At least one full live-refresh cycle must pass without collapsing it.
+    await page.waitForTimeout(16_000);
+    await expect(details).toHaveJSProperty("open", true);
+  });
 });
 
 test.describe("machine scope", () => {
@@ -345,6 +359,30 @@ test.describe("machine scope", () => {
     expect(local?.sessions).toBeGreaterThan(0);
     expect(local?.tools).toContain("claude-code");
     expect(local?.tools).toContain("codex");
+  });
+});
+
+test.describe("engine source switcher", () => {
+  test("chip shows current engine; pop lists, adds and removes entries without switching", async ({
+    page,
+  }) => {
+    await page.goto(PANEL);
+    await expect(page.locator("#engine-chip")).toContainText("127.0.0.1:4187");
+    await page.click("#engine-chip");
+    const pop = page.locator("#engine-pop[open]");
+    await expect(pop).toBeVisible();
+    // current engine marked, default entry present
+    await expect(pop.locator(".engine-row.cur").first()).toBeVisible();
+    // add a WSL engine entry
+    await page.fill("#engine-add-label", "WSL");
+    await page.fill("#engine-add-api", "http://localhost:4178");
+    await page.click("#engine-add-btn");
+    await expect(pop.locator(".engine-row", { hasText: "WSL" })).toBeVisible();
+    // remove it again — must not navigate away
+    await pop.locator(".engine-row", { hasText: "WSL" }).locator("[data-del]").click();
+    await expect(pop.locator(".engine-row", { hasText: "WSL" })).toHaveCount(0);
+    // still on the original engine
+    await expect(page.locator("#engine-pill-text")).toContainText("ENGINE ONLINE");
   });
 });
 

@@ -92,12 +92,22 @@ async function scanGroup(
       seenIds.add(event.session.id);
       summary.sessions++;
     }
-    store.transaction(() => {
-      for (const event of events) {
-        const result = store.upsert(event.session, event.sourceFile, event.rev);
-        summary[result.status]++;
-      }
-    });
+    // Chunked transactions: one giant transaction holding hundreds of
+    // sessions (each with potentially MBs of raw JSON) destabilizes the
+    // runtime on Windows (observed: bun segfault at ~0.9 GB RSS upserting a
+    // 1176-session opencode snapshot). 50 per commit keeps the journal small;
+    // a crash mid-ingest still leaves earlier batches committed and the rev
+    // dedupe makes a rescan skip them.
+    const BATCH = 50;
+    for (let i = 0; i < events.length; i += BATCH) {
+      const chunk = events.slice(i, i + BATCH);
+      store.transaction(() => {
+        for (const event of chunk) {
+          const result = store.upsert(event.session, event.sourceFile, event.rev);
+          summary[result.status]++;
+        }
+      });
+    }
     const pruned = store.pruneOtherSessions(sourceKey, seenIds);
     if (pruned > 0) summary.issues.push(`pruned ${pruned} stale sessions`);
   } catch (err) {
@@ -159,6 +169,15 @@ async function groupCandidates(
 }
 
 async function buildCandidates(transport: Transport, host: HostInfo): Promise<Candidate[]> {
+  if (host.platform === "win32") {
+    // Windows engine: also scan WSL distros over UNC — the reverse of the
+    // linux-side /mnt/c overlay. Sources become "<tool>@wsl-<distro>".
+    const wslGuestUserDirs = await listWslGuestUsers(transport);
+    return resolveCandidates(host.platform, {
+      homeDir: host.homeDir,
+      wslGuestUserDirs,
+    });
+  }
   const wslRoot = await detectWslHostUsersRoot(transport, host);
   if (!wslRoot) {
     return resolveCandidates(host.platform, { homeDir: host.homeDir });
@@ -171,6 +190,58 @@ async function buildCandidates(transport: Transport, host: HostInfo): Promise<Ca
     homeDir: host.homeDir,
     wslHostUserDirs: userDirs,
   });
+}
+
+/**
+ * Enumerate WSL distro user homes from a Windows host:
+ * \\wsl.localhost\<distro>\home\<user>.
+ *
+ * NOTE: listing the UNC root itself is unreliable (observed ECONNRESET /
+ * ENOENT on real machines — the 9P namespace root hangs when the WSL VM is
+ * busy), while direct subdir access always works. So the distro list comes
+ * from `wsl.exe -l -q` (UTF-16LE output, hence the decode dance) and only
+ * per-distro subdirs are listed over UNC.
+ */
+async function listWslGuestUsers(transport: Transport): Promise<{ label: string; dir: string }[]> {
+  const distros = await listWslDistros(transport);
+  const out: { label: string; dir: string }[] = [];
+  for (const name of distros) {
+    const home = `//wsl.localhost/${name}/home`;
+    const users = await transport.listDir(home);
+    for (const u of users ?? []) {
+      if (u.isDirectory && !u.name.startsWith(".")) {
+        out.push({ label: `wsl-${name}`, dir: `${home}/${u.name}` });
+      }
+    }
+  }
+  return out;
+}
+
+/** Infrastructure distros that never carry user session data. */
+const WSL_INFRA_DISTROS = /^docker-desktop(-data)?$/i;
+
+async function listWslDistros(transport: Transport): Promise<string[]> {
+  if (!transport.exec) return [];
+  try {
+    const r = await transport.exec(["wsl.exe", "-l", "-q"]);
+    if (r.exitCode !== 0) return [];
+    return parseWslDistroList(r.stdout);
+  } catch {
+    return [];
+  }
+}
+
+/** Exported for unit tests. wsl.exe prints UTF-16LE on Windows; when piped
+ *  through layers that decoded as UTF-8 the NULs survive, which we use to
+ *  detect and repair the encoding. */
+export function parseWslDistroList(stdout: string): string[] {
+  const text = stdout.includes("\0")
+    ? new TextDecoder("utf-16le").decode(Uint8Array.from(stdout, (c) => c.charCodeAt(0)))
+    : stdout;
+  return text
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\0/g, "").trim())
+    .filter((l) => /^[A-Za-z0-9._-]+$/.test(l) && !WSL_INFRA_DISTROS.test(l));
 }
 
 async function detectWslHostUsersRoot(
