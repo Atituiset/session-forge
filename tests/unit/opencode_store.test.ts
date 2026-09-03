@@ -335,6 +335,36 @@ describe("store", () => {
     store.close();
   });
 
+  test("deleteMachine removes all rows of one machine (rename cleanup)", () => {
+    const store = new Store(path.join(dir, "cache-del.db"));
+    const mk = (id: string, source: string): NirSession => ({
+      id,
+      source,
+      sourceVersion: null,
+      projectPath: "/p",
+      startedAt: "2026-08-01T00:00:00Z",
+      endedAt: null,
+      messages: [
+        {
+          role: "user",
+          content: "x",
+          timestamp: null,
+          toolName: null,
+          toolInput: null,
+          model: null,
+          thinking: null,
+        },
+      ],
+      rawMeta: {},
+    });
+    store.upsert(mk("l1", "codex"), "f", 1);
+    store.upsert(mk("r1", "codex@旧名字"), "f", 1);
+    store.upsert(mk("r2", "claude-code@旧名字"), "f", 1);
+    expect(store.deleteMachine("旧名字")).toBe(2);
+    expect(store.distinctSources()).toEqual(["codex"]);
+    store.close();
+  });
+
   test("machineSummaries groups rows by machine, local first", () => {
     const store = new Store(path.join(dir, "cache-machines.db"));
     const mk = (id: string, source: string): NirSession => ({

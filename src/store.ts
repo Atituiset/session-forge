@@ -129,6 +129,15 @@ export class Store {
     return { status: existing ? "updated" : "inserted" };
   }
 
+  /** Remove every row belonging to one machine ("tool@<machine>" suffix).
+   *  Used when a remote's label changes so the old label doesn't linger as
+   *  a phantom machine card. */
+  deleteMachine(machine: string): number {
+    const m = machine.replace(/([%_\\])/g, "\\$1");
+    const del = this.db.prepare("DELETE FROM sessions WHERE source LIKE ? ESCAPE '\\'");
+    return del.run(`%@${m}`).changes;
+  }
+
   pruneOtherSessions(source: string, keepIds: Set<string>): number {
     const rows = this.db.prepare("SELECT id FROM sessions WHERE source = ?").all(source) as {
       id: string;

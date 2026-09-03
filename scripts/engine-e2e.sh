@@ -63,6 +63,11 @@ if [ -f "$SESSION_FORGE_HOME/remotes.json" ]; then
   grep -q supersecret "$SESSION_FORGE_HOME/remotes.json" && { echo "PASSWORD ON DISK"; exit 1; }
 fi
 
+echo "== remote display label roundtrip =="
+curl -s -X POST "$B/api/remotes" -H 'content-type: application/json' \
+  -d '{"name":"labeled@10.9.9.9","username":"ci","password":"x","label":"开发机一"}' >/dev/null
+curl -s "$B/api/remotes" | grep -qE '"label":"(开发机一|\\u5f00\\u53d1\\u673a\\u4e00)"' || { echo "label missing"; exit 1; }
+
 echo "== delete remote =="
 curl -s -X DELETE "$B/api/remotes/ci@10.255.255.1" | grep -q ok
 curl -s "$B/api/remotes" | grep -q '10.255.255.1' && { echo "delete failed"; exit 1; }

@@ -93,20 +93,25 @@ function renderMachineCards() {
     }),
     { sessions: 0, tokensIn: 0, projects: 0, tools: [] },
   );
-  const card = (scope, name, m, mono) => `
+  const card = (scope, name, m, mono, tools) => `
     <div class="machine-card${machineScope === scope ? " active" : ""}" data-machine="${esc(scope)}"
-         title="点击只看${esc(name)}的数据">
+         title="点击只看${esc(name)}的数据 · 工具: ${esc((tools ?? []).join(", ") || "无")}">
       <div class="mname"><span class="dot"></span><span class="label">${esc(name)}</span></div>
       <div class="mstats"><b>${fmt(m.sessions)}</b> 会话 · <b>${fmt(m.projects)}</b> 项目 · <b>${fmt(m.tokensIn)}</b> tok</div>
       ${mono ? `<div class="mtools">${mono}</div>` : ""}
     </div>`;
-  const chips = (tools) =>
-    tools.slice(0, 4).map((t) => `<span class="chip">${esc(t)}</span>`).join("");
+  const chips = (tools) => tools.map((t) => `<span class="chip">${esc(t)}</span>`).join("");
   $("machine-cards").innerHTML =
-    card("", "全部机器", all, chips(all.tools)) +
+    card("", "全部机器", all, chips(all.tools), all.tools) +
     lastMachines
       .map((m) =>
-        card(m.machine, m.machine === "local" ? "本机" : m.machine, m, chips(m.tools ?? [])),
+        card(
+          m.machine,
+          m.machine === "local" ? "本机" : m.machine,
+          m,
+          chips(m.tools ?? []),
+          m.tools ?? [],
+        ),
       )
       .join("");
   document.querySelectorAll(".machine-card").forEach((c) => {
@@ -379,11 +384,13 @@ async function loadRemotes() {
         status = `<span class="chip err" title="${esc(job.error)}">失败：${esc(short(job.error ?? "", 40))}</span>`;
       }
       const running = job?.status === "running";
-      const display = r.username ? `${esc(r.username)}@${esc(r.host)}` : esc(r.host);
+      const address = r.username ? `${r.username}@${r.host}` : r.host;
+      const display = r.label ? esc(r.label) : esc(address);
       return `<div class="remote-row">
         <span class="dot${dot}"></span>
         <div class="meta">
-          <span class="host" title="${display}">${display}</span>
+          <span class="host" title="${esc(address)}">${display}</span>
+          ${r.label ? `<span class="sub">${esc(address)}</span>` : ""}
           ${status}
         </div>
         <button class="mini-btn" type="button" data-scan="${esc(r.name)}" ${running ? "disabled" : ""}>扫描</button>
@@ -405,6 +412,7 @@ async function loadRemotes() {
 }
 
 $("btn-remote-add").onclick = async () => {
+  const labelEl = $("remote-label");
   const hostEl = $("remote-host"), userEl = $("remote-user"), passEl = $("remote-pass");
   const host = hostEl.value.trim();
   if (!host) { hostEl.focus(); return; }
@@ -418,6 +426,7 @@ $("btn-remote-add").onclick = async () => {
       name,
       username: user || undefined,
       password: passEl.value || undefined,
+      label: labelEl.value.trim() || undefined,
     }),
   });
   if (!res.ok) {
@@ -425,7 +434,7 @@ $("btn-remote-add").onclick = async () => {
     alert(j.error ?? "添加失败");
     return;
   }
-  hostEl.value = ""; userEl.value = ""; passEl.value = "";
+  labelEl.value = ""; hostEl.value = ""; userEl.value = ""; passEl.value = "";
   $("remote-form-box").removeAttribute("open");
   loadRemotes();
 };

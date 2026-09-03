@@ -12,8 +12,13 @@ export class SshTransport implements Transport {
   // (and the serve loop) forever.
   private static readonly EXEC_TIMEOUT_MS = 30_000;
 
-  constructor(private readonly hostArg: string) {
-    this.label = `ssh:${hostArg}`;
+  constructor(
+    private readonly hostArg: string,
+    displayLabel?: string,
+  ) {
+    // displayLabel drives the machine suffix in stored sources; hostArg stays
+    // the ssh config alias used for the actual connection.
+    this.label = `ssh:${displayLabel?.trim() || hostArg}`;
   }
 
   private baseArgs(extra: string[]): string[] {

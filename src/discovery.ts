@@ -1,6 +1,6 @@
 import { readerFor } from "./readers/index.ts";
 import type { Candidate, ReaderFamily } from "./registry.ts";
-import { resolveCandidates } from "./registry.ts";
+import { heuristicCandidatesFor, resolveCandidates } from "./registry.ts";
 import type { Store } from "./store.ts";
 import type { HostInfo, Transport } from "./transport/types.ts";
 
@@ -169,27 +169,53 @@ async function groupCandidates(
 }
 
 async function buildCandidates(transport: Transport, host: HostInfo): Promise<Candidate[]> {
+  // Fixture mode must stay deterministic — no self-discovery against the
+  // runner's real home directory.
+  const adaptive = !process.env.SESSION_FORGE_TEST_FIXTURES;
+  const heurScopes: { dir: string; suffix: string }[] = [{ dir: host.homeDir, suffix: "" }];
+
+  let candidates: Candidate[];
   if (host.platform === "win32") {
     // Windows engine: also scan WSL distros over UNC — the reverse of the
     // linux-side /mnt/c overlay. Sources become "<tool>@wsl-<distro>".
     const wslGuestUserDirs = await listWslGuestUsers(transport);
-    return resolveCandidates(host.platform, {
+    if (adaptive) {
+      for (const g of wslGuestUserDirs) heurScopes.push({ dir: g.dir, suffix: `@${g.label}` });
+    }
+    candidates = resolveCandidates(host.platform, {
       homeDir: host.homeDir,
       wslGuestUserDirs,
     });
+  } else {
+    const wslRoot = await detectWslHostUsersRoot(transport, host);
+    if (!wslRoot) {
+      candidates = resolveCandidates(host.platform, { homeDir: host.homeDir });
+    } else {
+      const entries = await transport.listDir(wslRoot);
+      const userDirs = (entries ?? [])
+        .filter((e) => !e.name.includes("."))
+        .map((e) => `${wslRoot}/${e.name}`);
+      if (adaptive) {
+        for (const dir of userDirs) heurScopes.push({ dir, suffix: "@windows-host" });
+      }
+      candidates = resolveCandidates(host.platform, {
+        homeDir: host.homeDir,
+        wslHostUserDirs: userDirs,
+      });
+    }
   }
-  const wslRoot = await detectWslHostUsersRoot(transport, host);
-  if (!wslRoot) {
-    return resolveCandidates(host.platform, { homeDir: host.homeDir });
+  if (!adaptive) return candidates;
+
+  const existing = new Set(candidates.map((c) => c.pattern));
+  for (const { dir, suffix } of heurScopes) {
+    for (const c of await heuristicCandidatesFor(dir, suffix, transport)) {
+      if (!existing.has(c.pattern)) {
+        existing.add(c.pattern);
+        candidates.push(c);
+      }
+    }
   }
-  const entries = await transport.listDir(wslRoot);
-  const userDirs = (entries ?? [])
-    .filter((e) => !e.name.includes("."))
-    .map((e) => `${wslRoot}/${e.name}`);
-  return resolveCandidates(host.platform, {
-    homeDir: host.homeDir,
-    wslHostUserDirs: userDirs,
-  });
+  return candidates;
 }
 
 /**

@@ -7,6 +7,8 @@ export interface SshAuth {
   host: string;
   username?: string;
   password?: string;
+  /** Optional display label for the machine suffix in stored sources. */
+  label?: string;
 }
 
 // Pure-JS SSH transport (ssh2). Used when the remote entry carries an explicit
@@ -22,7 +24,7 @@ export class SshLibTransport implements Transport {
 
   constructor(private readonly auth: SshAuth) {
     const userPrefix = auth.username ? `${auth.username}@` : "";
-    this.label = `ssh:${userPrefix}${auth.host}`;
+    this.label = `ssh:${auth.label?.trim() || `${userPrefix}${auth.host}`}`;
   }
 
   /** Run fn with a connected, ready client; always cleans up. */

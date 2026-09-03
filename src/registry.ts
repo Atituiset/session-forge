@@ -148,8 +148,66 @@ export function resolveCandidates(platform: PlatformId, opts: ResolveOptions): C
   return out;
 }
 
-// Glob shape each reader expects under the fixture root (mirrors the real
-// layouts' tail segments).
+/** Directories covered by the curated TOOLS list (top-level dot dirs). */
+export function knownToolDirs(): Set<string> {
+  const dirs = new Set<string>();
+  for (const spec of TOOLS) {
+    for (const raw of spec.paths.linux ?? []) {
+      const m = /^~\/(\.[^/]+)\//.exec(raw);
+      if (m?.[1]) dirs.add(m[1]);
+    }
+  }
+  return dirs;
+}
+
+export interface CandidateProbe {
+  exists(path: string): Promise<boolean>;
+  listDir(path: string): Promise<{ name: string; isDirectory: boolean }[] | null>;
+}
+
+/**
+ * Adaptive discovery: scan a home directory for UNKNOWN agent-cli data
+ * directories by signature, instead of relying on the curated TOOLS list
+ * alone. Signatures (deliberately strict to avoid false positives):
+ *   ~/.x/session_index.jsonl                 → codex-family rollout layout
+ *   ~/.x/projects/<slug>/*.jsonl             → claude-code layout
+ *   ~/.x/opencode.db                         → opencode sqlite
+ * `suffix` carries the machine label for overlays (e.g. "@wsl-Ubuntu").
+ */
+export async function heuristicCandidatesFor(
+  homeDir: string,
+  suffix: string,
+  probe: CandidateProbe,
+): Promise<Candidate[]> {
+  const out: Candidate[] = [];
+  const entries = await probe.listDir(homeDir);
+  if (!entries) return out;
+  const known = knownToolDirs();
+  let inspected = 0;
+  for (const e of entries) {
+    if (!e.isDirectory || !/^\.[a-z0-9][a-z0-9_-]*$/i.test(e.name)) continue;
+    if (known.has(e.name)) continue;
+    if (++inspected > 40) break; // pathological homes (hundreds of dotdirs) stay cheap
+    const base = `${homeDir}/${e.name}`;
+    const toolId = `${e.name.slice(1)}${suffix}`;
+    if (await probe.exists(`${base}/session_index.jsonl`)) {
+      out.push(
+        { toolId, family: "codex-family", pattern: `${base}/session_index.jsonl` },
+        { toolId, family: "codex-family", pattern: `${base}/sessions/**/*.jsonl` },
+      );
+      continue;
+    }
+    const projects = await probe.listDir(`${base}/projects`);
+    if (projects?.some((p) => p.isDirectory)) {
+      out.push({ toolId, family: "claude-code", pattern: `${base}/projects/*/*.jsonl` });
+      continue;
+    }
+    if (await probe.exists(`${base}/opencode.db`)) {
+      out.push({ toolId, family: "opencode-sqlite", pattern: `${base}/opencode.db` });
+    }
+  }
+  return out;
+}
 function patternSuffixFor(family: ReaderFamily): string {
   switch (family) {
     case "claude-code":

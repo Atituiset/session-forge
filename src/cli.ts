@@ -583,6 +583,7 @@ program
               name: r.name,
               host: r.host,
               username: r.username,
+              label: r.label,
               hasPassword: remotePasswords.has(r.name),
               addedAt: r.addedAt,
               job: remoteJobs.get(r.name) ?? null,
@@ -594,6 +595,7 @@ program
             name?: string;
             username?: string;
             password?: string;
+            label?: string;
           };
           const name = body.name?.trim();
           if (!name || !/^[A-Za-z0-9_.@-]+$/.test(name)) {
@@ -601,6 +603,13 @@ program
               { error: "invalid host (allowed: letters digits _ . @ -)" },
               { status: 400 },
             );
+          }
+          // Display label is free-form (Chinese ok); just no control chars.
+          const rawLabel = body.label?.trim();
+          const hasCtrl = [...(rawLabel ?? "")].some((c) => (c.codePointAt(0) ?? 0) < 0x20);
+          const label = rawLabel && rawLabel.length <= 60 && !hasCtrl ? rawLabel : undefined;
+          if (rawLabel && label === undefined) {
+            return Response.json({ error: "invalid label" }, { status: 400 });
           }
           // Parse user@host form into explicit fields.
           let host = name;
@@ -615,10 +624,11 @@ program
           if (existing) {
             existing.username = username;
             existing.host = host;
+            existing.label = label;
             saveRemotes(remotes);
             setRemotePassword(name, body.password);
           } else {
-            remotes.push({ name, host, username, addedAt: Date.now() });
+            remotes.push({ name, host, username, label, addedAt: Date.now() });
             saveRemotes(remotes);
             setRemotePassword(name, body.password);
           }
@@ -650,15 +660,30 @@ program
             try {
               const remote = loadRemotes().find((r) => r.name === name);
               const pw = remotePasswords.get(name);
+              const label = remote?.label?.trim() || name;
+              // A rename must not leave the old machine tag behind — prune
+              // the previous label's rows so the card disappears.
+              if (remote?.lastScanLabel && remote.lastScanLabel !== label) {
+                const pruned = store.deleteMachine(remote.lastScanLabel);
+                if (pruned > 0)
+                  console.error(`[scan] renamed machine: pruned ${pruned} stale rows`);
+              }
               const sshTransport =
                 pw && remote?.host
                   ? new SshLibTransport({
                       host: remote.host,
                       username: remote.username,
                       password: pw,
+                      label,
                     })
-                  : new SshTransport(name);
+                  : new SshTransport(name, label);
               const summary = await discoverAndIngest(sshTransport, store);
+              const remotes = loadRemotes();
+              const entry = remotes.find((r) => r.name === name);
+              if (entry && entry.lastScanLabel !== label) {
+                entry.lastScanLabel = label;
+                saveRemotes(remotes);
+              }
               if (started?.status === "running") {
                 remoteJobs.set(name, {
                   ...started,
@@ -773,9 +798,14 @@ function remotesPath(): string {
 }
 
 export interface RemoteEntry {
-  name: string; // display name / ssh host (may be user@host)
+  name: string; // unique key; for key-auth this doubles as the ssh config Host alias
   host: string;
   username?: string;
+  /** User-chosen display name — becomes the machine tag on scanned sessions. */
+  label?: string;
+  /** Machine tag actually used by the last scan, so a later rename can prune
+   *  the old sources instead of leaving a phantom machine behind. */
+  lastScanLabel?: string;
   /** Only kept in-memory for the running server; never persisted to disk. */
   password?: string;
   addedAt: number;

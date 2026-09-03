@@ -66,6 +66,12 @@ if (-not $entry.hasPassword) { Cleanup; throw "hasPassword missing" }
 $disk = Join-Path $env:SESSION_FORGE_HOME "remotes.json"
 if ((Test-Path $disk) -and ((Get-Content $disk -Raw) -match "supersecret")) { Cleanup; throw "PASSWORD ON DISK" }
 
+# display label roundtrip
+Invoke-RestMethod "$base/api/remotes" -Method POST -ContentType "application/json; charset=utf-8" `
+  -Body ([Text.Encoding]::UTF8.GetBytes('{"name":"labeled@10.9.9.9","username":"ci","password":"x","label":"开发机一"}')) | Out-Null
+$labeled = (Invoke-RestMethod "$base/api/remotes").remotes | Where-Object { $_.name -eq "labeled@10.9.9.9" }
+if ($labeled.label -ne "开发机一") { Cleanup; throw "label roundtrip failed: $($labeled.label)" }
+
 # delete
 Invoke-RestMethod "$base/api/remotes/ci@10.255.255.1" -Method DELETE | Out-Null
 $list2 = Invoke-RestMethod "$base/api/remotes"

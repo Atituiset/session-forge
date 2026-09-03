@@ -174,15 +174,37 @@ test.describe("remote machines", () => {
     expect(await page.inputValue("#remote-pass")).toBe(""); // cleared after submit
   });
 
+  test("custom display label is shown instead of the address", async ({ page }) => {
+    await page.goto(PANEL);
+    await page.click("#remote-form-box summary");
+    await page.fill("#remote-label", "开发机一");
+    await page.fill("#remote-host", "named.example.com");
+    await page.fill("#remote-user", "ci");
+    await page.click("#btn-remote-add");
+    const row = page.locator(".remote-row", { hasText: "开发机一" });
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("ci@named.example.com"); // address as secondary line
+    // label field cleared after submit
+    expect(await page.inputValue("#remote-label")).toBe("");
+    // engine returned the label in its API payload
+    const list = (await (await fetch(`${API}/api/remotes`)).json()) as {
+      remotes: { name: string; label?: string }[];
+    };
+    expect(list.remotes.find((r) => r.name === "ci@named.example.com")?.label).toBe("开发机一");
+  });
+
   test("multiple machines can be added and listed with a count", async ({ page }) => {
     await page.goto(PANEL);
+    await page.reload();
+    await page.waitForTimeout(800);
+    const before = await page.locator(".remote-row").count();
     for (const host of ["a.example.com", "b.example.com"]) {
       await page.click("#remote-form-box summary");
       await page.fill("#remote-host", host);
       await page.click("#btn-remote-add");
     }
-    await expect(page.locator(".remote-row")).toHaveCount(3); // 1 from previous test + 2
-    await expect(page.locator("#remote-count")).toHaveText("3 台");
+    await expect(page.locator(".remote-row")).toHaveCount(before + 2);
+    await expect(page.locator("#remote-count")).toHaveText(`${before + 2} 台`);
   });
 
   test("delete removes the machine", async ({ page }) => {
