@@ -11,13 +11,15 @@ import {
   topFiles,
   totals,
 } from "./analytics/index.ts";
-import { discoverAndIngest } from "./discovery.ts";
+import { buildCandidatesFor, discoverAndIngest, groupCandidatesFor } from "./discovery.ts";
 import { IMPORT_FORMATS, importFile, isImportFormat } from "./import_file.ts";
 import type { IntentTag } from "./llm_enrich/intent.ts";
 import { llmClassify, ruleClassify } from "./llm_enrich/intent.ts";
 import { formatTokens, shortPath } from "./output/format.ts";
 import { renderKnowledgeBase } from "./output/markdown.ts";
 import { bar, renderTable } from "./output/terminal.ts";
+import { readerFor } from "./readers/index.ts";
+import type { ReaderFamily } from "./registry.ts";
 import { RELAY_TARGETS, relaySession } from "./relay.ts";
 import { filterNewHosts, parseSshConfigHosts, sshConfigPath } from "./ssh_config.ts";
 import type { SessionSummary } from "./store.ts";
@@ -382,6 +384,37 @@ program
       }
     },
   );
+
+program
+  .command("scan-jsonl")
+  .description(
+    "Stream discovered sessions as JSONL (one NIR session per line) to stdout" +
+      " — used by a Windows engine to ingest WSL-side data without copying files",
+  )
+  .option("--tools <ids>", "comma-separated tool ids to include (default: all)")
+  .option("--since <ms>", "only emit sessions whose rev exceeds this (ms epoch)")
+  .action(async (opts: { tools?: string; since?: string }) => {
+    const transport = new LocalTransport();
+    const host = await transport.host();
+    const only = opts.tools ? new Set(opts.tools.split(",").map((t) => t.trim())) : null;
+    const since = Number(opts.since ?? 0) || 0;
+    const candidates = await buildCandidatesFor(transport, host, only);
+    const grouped = await groupCandidatesFor(transport, candidates);
+    for (const [key, files] of grouped) {
+      const [toolId, family] = key.split("|") as [string, ReaderFamily];
+      if (!files.length) continue;
+      const reader = readerFor(family);
+      try {
+        for await (const ev of reader.scan(transport, { toolId, files })) {
+          if (ev.kind !== "session") continue;
+          if (ev.rev <= since) continue;
+          process.stdout.write(`${JSON.stringify({ rev: ev.rev, session: ev.session })}\n`);
+        }
+      } catch (err) {
+        console.error(`[scan-jsonl] ${toolId}: ${String(err).slice(0, 200)}`);
+      }
+    }
+  });
 
 program
   .command("import")

@@ -55,9 +55,12 @@ describe("registry", () => {
         (c) => c.pattern === "//wsl.localhost/Ubuntu/home/atituiset/.claude/projects/*/*.jsonl",
       ),
     ).toBe(true);
-    // opencode (SQLite) is intentionally skipped over UNC: file locking does
-    // not work on 9P shares and multi-GB snapshots destabilize the runtime.
-    expect(guest.some((c) => c.family === "opencode-sqlite")).toBe(false);
+    expect(
+      guest.some(
+        (c) =>
+          c.pattern === "//wsl.localhost/Ubuntu/home/atituiset/.local/share/opencode/opencode.db",
+      ),
+    ).toBe(true); // sqlite included — discovery routes it to the wsl-agent scan
   });
 
   test("every tool spec declares at least one linux path", () => {

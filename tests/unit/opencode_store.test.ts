@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { NirSession } from "../../src/nir/schema.ts";
@@ -362,6 +362,66 @@ describe("store", () => {
     store.upsert(mk("r2", "claude-code@旧名字"), "f", 1);
     expect(store.deleteMachine("旧名字")).toBe(2);
     expect(store.distinctSources()).toEqual(["codex"]);
+    store.close();
+  });
+
+  test("oversized raws are externalized to raw/*.json and read back", () => {
+    const store = new Store(path.join(dir, "cache-ext.db"));
+    const big = "x".repeat(700 * 1024); // > INLINE_RAW_MAX (512KB)
+    const session: NirSession = {
+      id: "big-1",
+      source: "opencode@wsl-Ubuntu",
+      sourceVersion: null,
+      projectPath: "/p",
+      startedAt: "2026-08-01T00:00:00Z",
+      endedAt: null,
+      messages: [
+        {
+          role: "user",
+          content: big,
+          timestamp: null,
+          toolName: null,
+          toolInput: null,
+          model: null,
+          thinking: null,
+        },
+      ],
+      rawMeta: {},
+    };
+    store.upsert(session, "f", 1);
+    // Row keeps a small index entry; the payload lives beside the db.
+    const rawDir = path.join(dir, "raw");
+    expect(existsSync(rawDir)).toBe(true);
+    const files = readdirSync(rawDir);
+    expect(files.length).toBe(1);
+    // Reads transparently fall back to the external file.
+    const back = store.getSession("opencode@wsl-Ubuntu", "big-1");
+    expect(back?.id).toBe("big-1");
+    expect(back?.messages[0]?.content).toBe(big);
+    // Prefix lookup (findSession) also resolves through the external file.
+    const found = store.findSession("big");
+    expect(found?.id).toBe("big-1");
+    // A newer rev rewrites the external file in place.
+    type NirMsg = NirSession["messages"][0];
+    const bigMsg = session.messages[0] as NirMsg;
+    const updated = { ...session, messages: [{ ...bigMsg, content: `${big}!` }] };
+    store.upsert(updated, "f", 2);
+    expect(
+      store.getSession("opencode@wsl-Ubuntu", "big-1")?.messages[0]?.content.endsWith("!"),
+    ).toBe(true);
+    // Small sessions still inline: a small sibling writes no new external file.
+    const small = {
+      ...session,
+      id: "small-1",
+      messages: [{ ...bigMsg, content: "hi" }],
+    };
+    store.upsert(small, "f", 1);
+    expect(store.getSession("opencode@wsl-Ubuntu", "small-1")?.id).toBe("small-1");
+    expect(readdirSync(rawDir).length).toBe(1); // no new external file
+    // Pruning removes both the row and the external payload.
+    store.pruneOtherSessions("opencode@wsl-Ubuntu", new Set(["small-1"]));
+    expect(readdirSync(rawDir).length).toBe(0);
+    expect(store.getSession("opencode@wsl-Ubuntu", "big-1")).toBeNull();
     store.close();
   });
 

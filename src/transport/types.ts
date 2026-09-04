@@ -33,4 +33,10 @@ export interface Transport {
   // into a single round trip.
   globMany?(patterns: string[]): Promise<string[][]>;
   exec?(argv: string[]): Promise<ExecResult>;
+  /** Streaming exec: line-oriented callback, no full-buffer retention. Used
+   *  for wsl-agent scans whose output can reach gigabytes. */
+  execStream?(
+    argv: string[],
+    onLine: (line: string) => Promise<void> | void,
+  ): Promise<{ exitCode: number; stderr: string }>;
 }

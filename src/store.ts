@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { enrichSession } from "./enrich/index.ts";
@@ -9,8 +9,13 @@ export interface UpsertResult {
   status: "inserted" | "updated" | "skipped";
 }
 
+// Sessions larger than this stay in sqlite; bigger ones are externalized to
+// <dbdir>/raw/*.json — Windows runtime stability (see upsert).
+const INLINE_RAW_MAX = 512 * 1024;
+
 export class Store {
   private db: Database;
+  private readonly dbPath: string;
   private upsertStmt: ReturnType<Database["prepare"]>;
   private getRevStmt: ReturnType<Database["prepare"]>;
 
@@ -21,6 +26,7 @@ export class Store {
   private static readonly INGEST_FORMAT_VERSION = 2;
 
   constructor(dbPath: string) {
+    this.dbPath = dbPath;
     mkdirSync(path.dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath, { create: true });
     this.db.exec("PRAGMA journal_mode = WAL");
@@ -110,6 +116,19 @@ export class Store {
     const stats = enrichSession(session);
     const localPath =
       typeof session.rawMeta.localPath === "string" ? (session.rawMeta.localPath as string) : null;
+    // Large payloads live OUTSIDE sqlite: binding multi-MB raw strings on the
+    // Windows runtime destabilizes it (0.1.20 crash root cause). SQLite keeps
+    // a small index row; the raw JSON lands in <home>/raw/<safe(source)>-<safe(id)>.json
+    // "inline" keeps tiny sessions in-row so old dbs / small tools stay simple.
+    const rawJson = JSON.stringify(session);
+    let rawCol: string;
+    if (rawJson.length > INLINE_RAW_MAX) {
+      mkdirSync(this.rawDirFor(session.source, session.id), { recursive: true });
+      writeFileSync(this.rawPathFor(session.source, session.id), rawJson);
+      rawCol = ""; // externalized
+    } else {
+      rawCol = rawJson;
+    }
     this.upsertStmt.run(
       session.source,
       session.id,
@@ -128,10 +147,20 @@ export class Store {
       stats.deletions,
       stats.hasError ? 1 : 0,
       localPath,
-      JSON.stringify(session),
+      rawCol,
       Date.now(),
     );
     return { status: existing ? "updated" : "inserted" };
+  }
+
+  private rawDirFor(_source: string, _id: string): string {
+    const dir = path.dirname(this.dbPath);
+    return path.join(dir, "raw");
+  }
+
+  private rawPathFor(source: string, id: string): string {
+    const safe = (s: string) => s.replace(/[^A-Za-z0-9_.@-]/g, "_").slice(-80);
+    return path.join(this.rawDirFor(source, id), `${safe(source)}-${safe(id)}.json`);
   }
 
   /** Remove every row belonging to one machine ("tool@<machine>" suffix).
@@ -139,6 +168,16 @@ export class Store {
    *  a phantom machine card. */
   deleteMachine(machine: string): number {
     const m = machine.replace(/([%_\\])/g, "\\$1");
+    const rows = this.db
+      .prepare("SELECT source, id FROM sessions WHERE source LIKE ? ESCAPE '\\'")
+      .all(`%@${m}`) as { source: string; id: string }[];
+    for (const r of rows) {
+      try {
+        rmSync(this.rawPathFor(r.source, r.id), { force: true });
+      } catch {
+        // externalized raw already gone — fine
+      }
+    }
     const del = this.db.prepare("DELETE FROM sessions WHERE source LIKE ? ESCAPE '\\'");
     return del.run(`%@${m}`).changes;
   }
@@ -148,6 +187,13 @@ export class Store {
       id: string;
     }[];
     const stale = rows.filter((r) => !keepIds.has(r.id)).map((r) => r.id);
+    for (const id of stale) {
+      try {
+        rmSync(this.rawPathFor(source, id), { force: true });
+      } catch {
+        // no externalized raw — fine
+      }
+    }
     if (stale.length === 0) return 0;
     let deleted = 0;
     this.transaction(() => {
@@ -309,11 +355,28 @@ export class Store {
       .all() as MachineSummary[];
   }
 
+  /** Highest rev already ingested for a source — used as the incremental
+   *  watermark by agent-mode scans (wsl.exe scan-jsonl --since). */
+  maxRevFor(source: string): number {
+    const row = this.db
+      .prepare("SELECT MAX(rev) AS m FROM sessions WHERE source = ?")
+      .get(source) as { m: number | null };
+    return row?.m ?? 0;
+  }
+
   getSession(source: string, id: string): NirSession | null {
     const row = this.db
       .prepare("SELECT raw FROM sessions WHERE source = ? AND id = ?")
       .get(source, id) as { raw: string } | undefined;
     if (!row) return null;
+    // Externalized sessions keep an empty raw column and live in raw/*.json.
+    if (row.raw === "") {
+      try {
+        return JSON.parse(readFileSync(this.rawPathFor(source, id), "utf8")) as NirSession;
+      } catch {
+        return null;
+      }
+    }
     return JSON.parse(row.raw) as NirSession;
   }
 
@@ -321,9 +384,10 @@ export class Store {
     // Escape LIKE wildcards so a prefix like "a%b" matches literally.
     const pattern = idOrPrefix.replace(/([%_\\])/g, "\\$1");
     const row = this.db
-      .prepare("SELECT raw FROM sessions WHERE id = ? OR id LIKE ? ESCAPE '\\' LIMIT 1")
-      .get(idOrPrefix, `${pattern}%`) as { raw: string } | undefined;
+      .prepare("SELECT source, id, raw FROM sessions WHERE id = ? OR id LIKE ? ESCAPE '\\' LIMIT 1")
+      .get(idOrPrefix, `${pattern}%`) as { source: string; id: string; raw: string } | undefined;
     if (!row) return null;
+    if (row.raw === "") return this.getSession(row.source, row.id);
     return JSON.parse(row.raw) as NirSession;
   }
 

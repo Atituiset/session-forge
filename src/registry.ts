@@ -110,11 +110,10 @@ function candidatesFor(spec: ToolSpec, platform: PlatformId, opts: ResolveOption
     for (const { label, dir } of opts.wslGuestUserDirs) {
       for (const raw of spec.paths.linux ?? []) {
         if (!raw.startsWith("~/")) continue;
-        // SQLite over a UNC 9P share can't lock ("database is locked"), and
-        // snapshotting multi-GB opencode.db files destabilizes the Windows
-        // runtime. JSONL families over UNC are proven fine; opencode via
-        // this overlay is deferred — run the WSL-side engine instead.
-        if (spec.family === "opencode-sqlite") continue;
+        // opencode (sqlite) over UNC can't lock and must not snapshot-copy:
+        // discovery routes it to the wsl-agent scan (wsl.exe + scan-jsonl)
+        // instead of the plain reader. The candidate stays so the agent path
+        // knows the db location/machine label.
         out.push({
           toolId: `${spec.id}@${label}`,
           family: spec.family,

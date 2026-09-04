@@ -51,6 +51,28 @@ export async function discoverAndIngest(
   return report;
 }
 
+/** Candidate building for streaming scans (scan-jsonl): optionally narrowed
+ *  to specific tool ids. Exported for the CLI. */
+export async function buildCandidatesFor(
+  transport: Transport,
+  host: HostInfo,
+  only: Set<string> | null,
+): Promise<Candidate[]> {
+  const all = await buildCandidates(transport, host);
+  if (!only) return all;
+  return all.filter((c) => {
+    const base = c.toolId.split("@")[0] ?? c.toolId;
+    return only.has(base);
+  });
+}
+
+export async function groupCandidatesFor(
+  transport: Transport,
+  candidates: Candidate[],
+): Promise<Map<string, string[]>> {
+  return groupCandidates(transport, candidates);
+}
+
 async function scanGroup(
   transport: Transport,
   store: Store,
@@ -79,6 +101,17 @@ async function scanGroup(
   const reader = readerFor(family);
   const seenIds = new Set<string>();
   try {
+    // SQLite over UNC (\\wsl.localhost\…) cannot lock and must not be copied
+    // (multi-GB snapshots both crawl and crash the runtime). Instead the
+    // query runs INSIDE the distro through our own linux binary streaming
+    // JSONL over the wsl.exe pipe — no cross-machine file copy at all.
+    if (
+      transport.kind === "local" &&
+      family === "opencode-sqlite" &&
+      /^[\\/]{2}/.test(group[0] ?? "")
+    ) {
+      return scanGroupViaWslAgent(transport, store, key, group);
+    }
     const events: Extract<import("./readers/util.ts").ScanEvent, { kind: "session" }>[] = [];
     let debugCount = 0;
     for await (const event of reader.scan(transport, { toolId: sourceKey, files: group })) {
@@ -263,7 +296,161 @@ async function listWslGuestUsers(transport: Transport): Promise<{ label: string;
   return out;
 }
 
-/** Infrastructure distros that never carry user session data. */
+async function scanGroupViaWslAgent(
+  transport: Transport,
+  store: Store,
+  key: string,
+  group: string[],
+): Promise<ToolScanSummary> {
+  const [toolId, family] = key.split("|") as [string, ReaderFamily];
+  const summary: ToolScanSummary = {
+    toolId,
+    family,
+    transport: "wsl-agent",
+    files: group.length,
+    sessions: 0,
+    inserted: 0,
+    updated: 0,
+    skipped: 0,
+    issues: [],
+  };
+  // UNC path shape: //wsl.localhost/<distro>/home/<user>/...
+  const m = /^\/\/wsl(?:\.localhost|\$)\/([^/]+)\/(.+)$/.exec(group[0] ?? "");
+  if (!m?.[1]) {
+    summary.issues.push("wsl-agent: cannot parse distro from UNC path");
+    return summary;
+  }
+  const distro = m[1];
+  if (!transport.exec) {
+    summary.issues.push("wsl-agent: transport cannot exec");
+    return summary;
+  }
+
+  // One shell round trip per candidate; deliberately NO quoting gymnastics
+  // — wsl.exe argument forwarding mangles nested quotes/$(eval …) (verified
+  // on real hardware: the for/eval variant silently matched "[ -x ]").
+  const home = "$HOME";
+  const candidates = [
+    `${home}/.local/bin/session-forge`,
+    `${home}/session-forge`,
+    "/usr/local/bin/session-forge",
+  ];
+  let agentBin: string | null = null;
+  for (const cand of candidates) {
+    const r = await transport.exec([
+      "wsl.exe",
+      "-d",
+      distro,
+      "--",
+      "sh",
+      "-c",
+      `test -x ${cand} && echo ${cand}`,
+    ]);
+    const out = r.stdout.trim();
+    if (r.exitCode === 0 && out.startsWith("/")) {
+      agentBin = out.split("\n")[0] ?? null;
+      break;
+    }
+  }
+  if (!agentBin) {
+    summary.issues.push(
+      `wsl-agent: ${distro} 里没找到 session-forge 二进制（安装到 ~/.local/bin/session-forge 后重扫）`,
+    );
+    return summary;
+  }
+  if (!agentBin) {
+    summary.issues.push(
+      `wsl-agent: ${distro} 里没找到 session-forge 二进制（安装: curl -L … 或放置于 ~/.local/bin/session-forge）`,
+    );
+    return summary;
+  }
+
+  // Stream the agent's JSONL output line by line — never buffered whole.
+  const maxRev = store.maxRevFor(toolId);
+  if (!transport.execStream) {
+    summary.issues.push("wsl-agent: transport cannot execStream");
+    return summary;
+  }
+  const seenIds = new Set<string>();
+  const adapter = adapterForSource(toolId, "win32");
+  const BATCH = 50;
+  let batch: { session: NirSessionLike; rev: number }[] = [];
+  const flush = () => {
+    if (!batch.length) return;
+    store.transaction(() => {
+      for (const b of batch) {
+        const result = store.upsert(b.session, "wsl-agent", b.rev);
+        summary[result.status]++;
+      }
+    });
+    batch = [];
+  };
+  const stream = await transport.execStream(
+    [
+      "wsl.exe",
+      "-d",
+      distro,
+      "--",
+      agentBin,
+      "scan-jsonl",
+      "--tools",
+      "opencode",
+      ...(maxRev > 0 ? ["--since", String(maxRev)] : []),
+    ],
+    async (line) => {
+      const t = line.trim();
+      if (!t) return;
+      let parsed: { rev?: number; session?: NirSessionLike };
+      try {
+        parsed = JSON.parse(t);
+      } catch {
+        summary.issues.push("wsl-agent: unparsable line");
+        return;
+      }
+      if (!parsed.session) return;
+      summary.sessions++;
+      seenIds.add(parsed.session.id);
+      // The agent runs inside the guest and stamps sessions with its local
+      // source ("opencode"); rebrand to the overlay toolId so rows land under
+      // opencode@wsl-<distro> (machine card, rev watermark, prune all key on it).
+      if (parsed.session.source !== toolId) {
+        parsed.session = { ...parsed.session, source: toolId };
+      }
+      // Same root/localPath plumbing as the normal scan path, evaluated on
+      // the Windows side (UNC probing via the adapter).
+      if (parsed.session.projectPath) {
+        const root = await resolveProjectRoot(transport, adapter, parsed.session.projectPath);
+        const local = adapter.local(root);
+        if (root !== parsed.session.projectPath || (local && local !== root)) {
+          parsed.session = {
+            ...parsed.session,
+            projectPath: root,
+            rawMeta: {
+              ...parsed.session.rawMeta,
+              ...(local && local !== root ? { localPath: local } : {}),
+            },
+          };
+        }
+      }
+      batch.push({ session: parsed.session, rev: parsed.rev ?? 0 });
+      if (batch.length >= BATCH) flush();
+    },
+  );
+  flush();
+  if (stream.exitCode !== 0 && summary.sessions === 0) {
+    summary.issues.push(`wsl-agent: ${stream.stderr.slice(0, 200) || `exit ${stream.exitCode}`}`);
+    return summary;
+  }
+  // Prune ONLY on full scans: an incremental pass (--since watermark) sees a
+  // subset, and pruning to it would wipe every unchanged session.
+  if (maxRev === 0) {
+    const pruned = store.pruneOtherSessions(toolId, seenIds);
+    if (pruned > 0) summary.issues.push(`pruned ${pruned} stale sessions`);
+  }
+  return summary;
+}
+
+type NirSessionLike = import("./nir/schema.ts").NirSession;
 const WSL_INFRA_DISTROS = /^docker-desktop(-data)?$/i;
 
 async function listWslDistros(transport: Transport): Promise<string[]> {

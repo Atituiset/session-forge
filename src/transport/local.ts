@@ -71,6 +71,59 @@ export class LocalTransport implements Transport {
     const exitCode = await proc.exited;
     return { exitCode, stdout, stderr };
   }
+
+  /** Line-streaming exec: keeps memory flat for gigabyte-scale outputs
+   *  (wsl-agent scan-jsonl pipes). */
+  async execStream(
+    argv: string[],
+    onLine: (line: string) => Promise<void> | void,
+  ): Promise<{ exitCode: number; stderr: string }> {
+    const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe" });
+    const stderrChunks: string[] = [];
+    const drainErr = (async () => {
+      const reader = proc.stderr.getReader();
+      const dec = new TextDecoder();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        stderrChunks.push(dec.decode(value));
+        if (stderrChunks.join("").length > 64_000) break;
+      }
+    })();
+    let buf = "";
+    const reader = proc.stdout.getReader();
+    const dec = new TextDecoder();
+    const pending: Promise<void>[] = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (value) buf += dec.decode(value, { stream: true });
+      if (done) {
+        buf += dec.decode();
+        if (buf.length > 0) await onLine(buf);
+        break;
+      }
+      let nl = buf.indexOf("\n");
+      // Drain every complete line; cap backpressure at a few lines so a slow
+      // consumer doesn't stall the pipe.
+      while (nl >= 0) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        nl = buf.indexOf("\n");
+        const p = onLine(line);
+        if (p && typeof p.then === "function") {
+          pending.push(p);
+          if (pending.length > 8) {
+            await Promise.all(pending);
+            pending.length = 0;
+          }
+        }
+      }
+    }
+    await Promise.all(pending);
+    await drainErr;
+    const exitCode = await proc.exited;
+    return { exitCode, stderr: stderrChunks.join("") };
+  }
 }
 
 function normalizePlatform(p: string): PlatformId {
