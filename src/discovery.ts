@@ -1,3 +1,4 @@
+import { adapterForSource, resolveProjectRoot } from "./paths.ts";
 import { readerFor } from "./readers/index.ts";
 import type { Candidate, ReaderFamily } from "./registry.ts";
 import { heuristicCandidatesFor, resolveCandidates } from "./registry.ts";
@@ -39,7 +40,7 @@ export async function discoverAndIngest(
   // round trip.
   const entries = [...grouped.entries()];
   const summaries = await Promise.all(
-    entries.map(([key, group]) => scanGroup(transport, store, key, group)),
+    entries.map(([key, group]) => scanGroup(transport, store, key, group, host)),
   );
   const report: DiscoveryReport = {
     host,
@@ -55,6 +56,7 @@ async function scanGroup(
   store: Store,
   key: string,
   group: string[],
+  host: HostInfo,
 ): Promise<ToolScanSummary> {
   const [toolId, family] = key.split("|") as [string, ReaderFamily];
   const sourceKey =
@@ -87,6 +89,24 @@ async function scanGroup(
       if (event.kind === "issue") {
         summary.issues.push(`${event.path}: ${event.error}`);
         continue;
+      }
+      // Aggregate by project ROOT: walk up to the nearest .git so sessions
+      // started in subdirs of the same repo land on one card row, and derive
+      // the locally reachable twin path for cross-WSL/Windows sources.
+      if (event.session.projectPath) {
+        const adapter = adapterForSource(sourceKey, host.platform);
+        const root = await resolveProjectRoot(transport, adapter, event.session.projectPath);
+        const local = adapter.local(root);
+        if (root !== event.session.projectPath || (local && local !== root)) {
+          event.session = {
+            ...event.session,
+            projectPath: root,
+            rawMeta: {
+              ...event.session.rawMeta,
+              ...(local && local !== root ? { localPath: local } : {}),
+            },
+          };
+        }
       }
       events.push(event);
       seenIds.add(event.session.id);

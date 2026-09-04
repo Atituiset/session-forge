@@ -19,6 +19,10 @@ export interface ProjectAgg {
   deletions: number;
   tokensIn: number;
   rounds: number;
+  /** Full root path (first non-null among the aggregated rows). */
+  projectPath: string | null;
+  /** Cross-boundary twin path (/mnt/c/… or //wsl.localhost/…), when present. */
+  projectLocal: string | null;
 }
 
 export interface TimeAgg {
@@ -72,9 +76,13 @@ export function aggregateByProject(rows: SessionSummary[], limit = 15): ProjectA
         deletions: 0,
         tokensIn: 0,
         rounds: 0,
+        projectPath: r.projectPath,
+        projectLocal: r.localPath,
       };
       map.set(key, agg);
     }
+    if (!agg.projectPath && r.projectPath) agg.projectPath = r.projectPath;
+    if (!agg.projectLocal && r.localPath) agg.projectLocal = r.localPath;
     agg.sessions++;
     agg.additions += r.additions;
     agg.deletions += r.deletions;

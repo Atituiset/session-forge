@@ -42,6 +42,7 @@ export class Store {
         additions INTEGER NOT NULL DEFAULT 0,
         deletions INTEGER NOT NULL DEFAULT 0,
         has_error INTEGER NOT NULL DEFAULT 0,
+        local_path TEXT,
         raw TEXT NOT NULL,
         scanned_at INTEGER NOT NULL DEFAULT 0,
         tags TEXT NOT NULL DEFAULT '[]',
@@ -57,6 +58,7 @@ export class Store {
       "ALTER TABLE sessions ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'",
       "ALTER TABLE sessions ADD COLUMN token_source TEXT NOT NULL DEFAULT 'none'",
       "ALTER TABLE sessions ADD COLUMN has_error INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE sessions ADD COLUMN local_path TEXT",
     ]) {
       try {
         this.db.exec(ddl);
@@ -75,8 +77,8 @@ export class Store {
     this.upsertStmt = this.db.prepare(
       `INSERT INTO sessions (source, id, rev, project_path, started_at, ended_at, model,
          tokens_in, tokens_out, token_source, cost, rounds, files_json, additions,
-         deletions, has_error, raw, scanned_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         deletions, has_error, local_path, raw, scanned_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(source, id) DO UPDATE SET
          rev=excluded.rev, project_path=excluded.project_path, started_at=excluded.started_at,
          ended_at=excluded.ended_at, model=excluded.model, tokens_in=excluded.tokens_in,
@@ -84,7 +86,7 @@ export class Store {
          cost=excluded.cost, rounds=excluded.rounds,
          files_json=excluded.files_json, additions=excluded.additions,
          deletions=excluded.deletions, has_error=excluded.has_error,
-         raw=excluded.raw, scanned_at=excluded.scanned_at
+         local_path=excluded.local_path, raw=excluded.raw, scanned_at=excluded.scanned_at
        WHERE sessions.rev < excluded.rev`,
     );
     this.getRevStmt = this.db.prepare("SELECT rev FROM sessions WHERE source = ? AND id = ?");
@@ -106,6 +108,8 @@ export class Store {
     const existing = this.getRevStmt.get(session.source, session.id) as { rev: number } | null;
     if (existing && existing.rev >= rev) return { status: "skipped" };
     const stats = enrichSession(session);
+    const localPath =
+      typeof session.rawMeta.localPath === "string" ? (session.rawMeta.localPath as string) : null;
     this.upsertStmt.run(
       session.source,
       session.id,
@@ -123,6 +127,7 @@ export class Store {
       stats.additions,
       stats.deletions,
       stats.hasError ? 1 : 0,
+      localPath,
       JSON.stringify(session),
       Date.now(),
     );
@@ -190,7 +195,7 @@ export class Store {
       .prepare(
         `SELECT source, id, project_path AS projectPath, started_at AS startedAt, ended_at AS endedAt,` +
           ` model, tokens_in AS tokensIn, tokens_out AS tokensOut, token_source AS tokenSource, cost, rounds,` +
-          ` files_json AS filesJson, additions, deletions, has_error AS hasError, tags AS tagsJson, ${rawExpr} FROM sessions${whereSql}`,
+          ` files_json AS filesJson, additions, deletions, has_error AS hasError, local_path AS localPath, tags AS tagsJson, ${rawExpr} FROM sessions${whereSql}`,
       )
       .all(...params) as SessionSummary[];
   }
@@ -216,17 +221,20 @@ export class Store {
     }
     if (opts.machine) applyMachineFilter(opts.machine, where, params);
     if (opts.q) {
-      // Escape LIKE wildcards so a query like "a%b" matches literally.
+      // Escape LIKE wildcards so a query like "a%b" matches literally. Also
+      // match the cross-boundary twin path (/mnt/c/… ↔ //wsl.localhost/…).
       const pattern = opts.q.replace(/([%_\\])/g, "\\$1");
-      where.push("(id LIKE ? ESCAPE '\\' OR project_path LIKE ? ESCAPE '\\')");
-      params.push(`%${pattern}%`, `%${pattern}%`);
+      where.push(
+        "(id LIKE ? ESCAPE '\\' OR project_path LIKE ? ESCAPE '\\' OR local_path LIKE ? ESCAPE '\\')",
+      );
+      params.push(`%${pattern}%`, `%${pattern}%`, `%${pattern}%`);
     }
     const whereSql = where.length > 0 ? ` WHERE ${where.join(" AND ")}` : "";
     const sessions = this.db
       .prepare(
         `SELECT source, id, project_path AS projectPath, started_at AS startedAt, ended_at AS endedAt,` +
           ` model, tokens_in AS tokensIn, tokens_out AS tokensOut, token_source AS tokenSource, cost, rounds,` +
-          ` files_json AS filesJson, additions, deletions, has_error AS hasError, tags AS tagsJson, NULL AS raw` +
+          ` files_json AS filesJson, additions, deletions, has_error AS hasError, local_path AS localPath, tags AS tagsJson, NULL AS raw` +
           ` FROM sessions${whereSql} ORDER BY started_at IS NULL, started_at DESC LIMIT ? OFFSET ?`,
       )
       .all(...params, opts.limit, opts.offset) as SessionSummary[];
@@ -310,6 +318,8 @@ export interface SessionSummary {
   source: string;
   id: string;
   projectPath: string | null;
+  /** Locally reachable twin of projectPath for cross-WSL/Windows sources. */
+  localPath: string | null;
   startedAt: string | null;
   endedAt: string | null;
   model: string | null;

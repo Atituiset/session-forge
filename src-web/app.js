@@ -250,7 +250,7 @@ function render(d) {
   $("projects").innerHTML =
     `<tr><th>项目</th><th>来源</th><th style="text-align:right">会话</th><th style="text-align:right">变更</th><th style="text-align:right">Tokens</th></tr>` +
     d.projects.map((p) =>
-      `<tr><td>${esc(p.project)}</td><td><span class="chip">${esc(p.source)}</span></td>
+      `<tr><td title="${esc(p.projectPath ?? "")}${p.projectLocal ? `\n${esc(p.projectLocal)}` : ""}">${esc(p.project)}${p.projectLocal ? `<div class="sub" style="color:var(--dim);font-size:10px;font-family:var(--mono)">${esc(short(p.projectLocal, 34))}</div>` : ""}</td><td><span class="chip">${esc(p.source)}</span></td>
        <td class="num">${p.sessions}</td><td class="num" style="color:var(--green)">+${fmt(p.additions)}</td>
        <td class="num">${fmt(p.tokensIn)}</td></tr>`
     ).join("");
@@ -518,12 +518,13 @@ function renderSessions(j) {
       const tokens = rows.reduce((sum, s) => sum + (s.tokensIn || 0), 0);
       const closed = collapsedProjects.has(proj);
       const name = proj ? short(proj, 52) : "(无项目路径)";
+      const twin = rows.find((s) => s.localPath && s.localPath !== proj)?.localPath;
       const body = rows.map((s) => {
         const machine = machineOf(s.source);
-        return `<div class="session-row" data-source="${esc(s.source)}" data-id="${esc(s.id)}">
+        return `<div class="session-row" data-source="${esc(s.source)}" data-id="${esc(s.id)}" title="${esc(s.projectPath ?? "")}${twin ? `\n${esc(twin)}` : ""}">
           <span class="chip">${esc(baseTool(s.source))}</span>
           <div class="meta">
-            <span class="proj" title="${esc(s.id)}">${esc(short(s.id, 38))}</span>
+            <span class="proj">${esc(short(s.id, 38))}</span>
             <span class="sub">${fmtTime(s.startedAt)}${s.endedAt ? ` → ${fmtTime(s.endedAt)}` : ""}${s.model ? ` · ${esc(s.model)}` : ""}${machine ? ` · <span class="machine">@${esc(machine)}</span>` : ""}</span>
           </div>
           <div class="stats">${s.rounds} 轮<b>${fmt(s.tokensIn)} tok</b></div>
@@ -682,12 +683,16 @@ function renderSessionDetail(j) {
   const stats = row
     ? `<b>${fmt(row.tokensIn)}</b> in · <b>${fmt(row.tokensOut)}</b> out · <b>${row.rounds}</b> 轮`
     : `<b>${(j.messages ?? []).length}</b> 条消息`;
+  const twin = j.rawMeta?.localPath && j.rawMeta.localPath !== j.projectPath
+    ? `<div class="sub" style="width:100%;font-family:var(--mono);font-size:10.5px;color:var(--dim)" title="${esc(j.rawMeta.localPath)}">本机路径：${esc(j.rawMeta.localPath)}</div>`
+    : "";
   const head = `<div class="sess-head">
     <span class="chip">${esc(j.source)}</span>
     <span class="proj" title="${esc(j.projectPath || j.id)}">${esc(short(j.projectPath || j.id, 56))}</span>
     <span class="stats">${fmtTime(j.startedAt)}${j.endedAt ? ` → ${fmtTime(j.endedAt)}` : ""} · ${stats}</span>
     ${relayControlsHtml(j)}
     <button class="mini-btn sess-close" type="button" id="session-close">关闭 ✕</button>
+    ${twin}
   </div>`;
   const relay = openSession?.relayResult ?? "";
   const body = (j.messages ?? []).map(renderMsg).join("") || `<div class="remote-empty">此会话没有消息</div>`;
