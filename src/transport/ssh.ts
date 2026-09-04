@@ -56,6 +56,61 @@ export class SshTransport implements Transport {
     }
   }
 
+  /** Line-streaming exec for agent scans: outputs can reach gigabytes, so
+   *  nothing may buffer stdout whole. Timeout is generous (connect+scan). */
+  async execStream(
+    argv: string[],
+    onLine: (line: string) => Promise<void> | void,
+  ): Promise<{ exitCode: number; stderr: string }> {
+    const proc = Bun.spawn(this.baseArgs(argv), { stdout: "pipe", stderr: "pipe" });
+    const timer = setTimeout(() => proc.kill(), 10 * 60_000);
+    let stderrTail = "";
+    const drainErr = (async () => {
+      const reader = proc.stderr.getReader();
+      const dec = new TextDecoder();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        stderrTail = (stderrTail + dec.decode(value)).slice(-8_000);
+      }
+    })();
+    try {
+      const reader = proc.stdout.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      const pending: Promise<void>[] = [];
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (value) buf += dec.decode(value, { stream: true });
+        if (done) {
+          buf += dec.decode();
+          if (buf.length > 0) await onLine(buf);
+          break;
+        }
+        let nl = buf.indexOf("\n");
+        while (nl >= 0) {
+          const line = buf.slice(0, nl);
+          buf = buf.slice(nl + 1);
+          nl = buf.indexOf("\n");
+          const p = onLine(line);
+          if (p && typeof p.then === "function") {
+            pending.push(p);
+            if (pending.length > 8) {
+              await Promise.all(pending);
+              pending.length = 0;
+            }
+          }
+        }
+      }
+      await Promise.all(pending);
+      await drainErr;
+      const exitCode = await proc.exited;
+      return { exitCode, stderr: stderrTail };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async host(): Promise<HostInfo> {
     if (this.cachedHost) return this.cachedHost;
     const kernel = await this.exec(["uname", "-s"]);

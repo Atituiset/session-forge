@@ -86,6 +86,67 @@ export class SshLibTransport implements Transport {
     });
   }
 
+  /** Line-streaming exec for agent scans (never buffer stdout whole). */
+  private execOneStream(
+    client: Client,
+    command: string,
+    onLine: (line: string) => Promise<void> | void,
+  ): Promise<{ exitCode: number; stderr: string }> {
+    return new Promise((resolve, reject) => {
+      client.exec(command, (err, stream) => {
+        if (err) return reject(err);
+        let buf = "";
+        let stderrTail = "";
+        const pending: Promise<void>[] = [];
+        stream.on("data", (chunk: Buffer) => {
+          buf += chunk.toString("utf8");
+          let nl = buf.indexOf("\n");
+          while (nl >= 0) {
+            const line = buf.slice(0, nl);
+            buf = buf.slice(nl + 1);
+            nl = buf.indexOf("\n");
+            const p = onLine(line);
+            if (p && typeof p.then === "function") pending.push(p);
+          }
+        });
+        stream.stderr?.on("data", (chunk: Buffer) => {
+          stderrTail = (stderrTail + chunk.toString("utf8")).slice(-8_000);
+        });
+        stream.on("close", (code: number | undefined) => {
+          Promise.all(pending)
+            .then(() => resolve({ exitCode: code ?? 1, stderr: stderrTail }))
+            .catch(reject);
+        });
+      });
+    });
+  }
+
+  async execStream(
+    argv: string[],
+    onLine: (line: string) => Promise<void> | void,
+  ): Promise<{ exitCode: number; stderr: string }> {
+    const command = argv.map(shellQuote).join(" ");
+    return this.withClient((client) => this.execOneStream(client, command, onLine));
+  }
+
+  /** Upload a local file over sftp (used to auto-deploy the scan agent). */
+  async deployFile(localPath: string, remoteRelPath: string): Promise<void> {
+    const data = Buffer.from(await Bun.file(localPath).arrayBuffer());
+    await this.withClient(
+      (client) =>
+        new Promise<void>((resolve, reject) => {
+          client.sftp((err, sftp) => {
+            if (err) return reject(err);
+            sftp.writeFile(remoteRelPath, data, (werr: unknown) => {
+              if (werr) return reject(werr as Error);
+              sftp.end();
+              resolve();
+            });
+          });
+        }),
+    );
+  }
+
   async exec(argv: string[]): Promise<ExecResult> {
     const command = argv.map(shellQuote).join(" ");
     return this.withClient((client) => this.execOne(client, command));

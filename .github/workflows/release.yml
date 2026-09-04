@@ -50,6 +50,10 @@ jobs:
             echo "==> $target -> $outfile"
             bun build --compile --target="$target" src/cli.ts --outfile "src-tauri/binaries/$outfile"
           done
+          # Linux scan agent (auto-deployed to WSL/ssh targets by the engine).
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            bun build --compile --target=bun-linux-x64 src/cli.ts --outfile "src-tauri/binaries/session-forge-linux-x64-agent"
+          fi
           ls -lh src-tauri/binaries/
       - uses: actions/upload-artifact@v4
         with:
@@ -74,11 +78,18 @@ jobs:
         with:
           pattern: sidecars-${{ matrix.os }}
           path: .
+      - name: download linux scan agent (all platforms bundle it)
+        uses: actions/download-artifact@v4
+        with:
+          name: sidecars-ubuntu-latest
+          path: sidecar-linux
       - name: place sidecars
         shell: bash
         run: |
           mkdir -p src-tauri/binaries
           cp sidecars-${{ matrix.os }}/* src-tauri/binaries/
+          cp sidecar-linux/session-forge-linux-x64-agent src-tauri/binaries/ || \
+            echo "::warning::linux agent missing — auto-deploy disabled"
           chmod +x src-tauri/binaries/* || true
       - uses: dtolnay/rust-toolchain@stable
       - name: linux system deps

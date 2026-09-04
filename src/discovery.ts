@@ -1,3 +1,4 @@
+import { type AgentChannel, channelApi, ensureAgent, wslChannelFromUnc } from "./agent.ts";
 import { adapterForSource, resolveProjectRoot } from "./paths.ts";
 import { readerFor } from "./readers/index.ts";
 import type { Candidate, ReaderFamily } from "./registry.ts";
@@ -101,16 +102,15 @@ async function scanGroup(
   const reader = readerFor(family);
   const seenIds = new Set<string>();
   try {
-    // SQLite over UNC (\\wsl.localhost\…) cannot lock and must not be copied
-    // (multi-GB snapshots both crawl and crash the runtime). Instead the
-    // query runs INSIDE the distro through our own linux binary streaming
-    // JSONL over the wsl.exe pipe — no cross-machine file copy at all.
-    if (
-      transport.kind === "local" &&
-      family === "opencode-sqlite" &&
-      /^[\\/]{2}/.test(group[0] ?? "")
-    ) {
-      return scanGroupViaWslAgent(transport, store, key, group);
+    // SQLite stores cannot be read across the wire: UNC shares give no
+    // locks and multi-GB ssh snapshots crash the runtime. Both WSL guests
+    // and ssh remotes instead run our agent binary on the source machine
+    // (auto-deployed) and stream JSONL back — no cross-machine copying.
+    if (family === "opencode-sqlite" && group[0]) {
+      const channel = agentChannelForCandidate(transport, group[0]);
+      if (channel) {
+        return scanGroupViaAgent(transport, store, key, group, channel);
+      }
     }
     const events: Extract<import("./readers/util.ts").ScanEvent, { kind: "session" }>[] = [];
     let debugCount = 0;
@@ -296,17 +296,31 @@ async function listWslGuestUsers(transport: Transport): Promise<{ label: string;
   return out;
 }
 
-async function scanGroupViaWslAgent(
+/** Which agent channel (if any) a candidate path needs: UNC paths on the
+ *  local transport mean WSL guests; ssh transports mean remote machines. */
+function agentChannelForCandidate(transport: Transport, firstFile: string): AgentChannel | null {
+  if (transport.kind === "local" && /^[\\/]{2}/.test(firstFile)) {
+    return wslChannelFromUnc(firstFile);
+  }
+  if (transport.kind === "ssh") {
+    const hostArg = transport.label.replace(/^ssh:/, "");
+    return hostArg ? { kind: "ssh", hostArg } : null;
+  }
+  return null;
+}
+
+async function scanGroupViaAgent(
   transport: Transport,
   store: Store,
   key: string,
   group: string[],
+  channel: AgentChannel,
 ): Promise<ToolScanSummary> {
   const [toolId, family] = key.split("|") as [string, ReaderFamily];
   const summary: ToolScanSummary = {
     toolId,
     family,
-    transport: "wsl-agent",
+    transport: channel.kind === "wsl" ? "wsl-agent" : "ssh-agent",
     files: group.length,
     sessions: 0,
     inserted: 0,
@@ -314,84 +328,38 @@ async function scanGroupViaWslAgent(
     skipped: 0,
     issues: [],
   };
-  // UNC path shape: //wsl.localhost/<distro>/home/<user>/...
-  const m = /^\/\/wsl(?:\.localhost|\$)\/([^/]+)\/(.+)$/.exec(group[0] ?? "");
-  if (!m?.[1]) {
-    summary.issues.push("wsl-agent: cannot parse distro from UNC path");
-    return summary;
-  }
-  const distro = m[1];
   if (!transport.exec) {
-    summary.issues.push("wsl-agent: transport cannot exec");
+    summary.issues.push("agent: transport cannot exec");
     return summary;
   }
 
-  // One shell round trip per candidate; deliberately NO quoting gymnastics
-  // — wsl.exe argument forwarding mangles nested quotes/$(eval …) (verified
-  // on real hardware: the for/eval variant silently matched "[ -x ]").
-  const home = "$HOME";
-  const candidates = [
-    `${home}/.local/bin/session-forge`,
-    `${home}/session-forge`,
-    "/usr/local/bin/session-forge",
-  ];
-  let agentBin: string | null = null;
-  for (const cand of candidates) {
-    const r = await transport.exec([
-      "wsl.exe",
-      "-d",
-      distro,
-      "--",
-      "sh",
-      "-c",
-      `test -x ${cand} && echo ${cand}`,
-    ]);
-    const out = r.stdout.trim();
-    if (r.exitCode === 0 && out.startsWith("/")) {
-      agentBin = out.split("\n")[0] ?? null;
-      break;
-    }
-  }
-  if (!agentBin) {
-    summary.issues.push(
-      `wsl-agent: ${distro} 里没找到 session-forge 二进制（安装到 ~/.local/bin/session-forge 后重扫）`,
-    );
-    return summary;
-  }
-  if (!agentBin) {
-    summary.issues.push(
-      `wsl-agent: ${distro} 里没找到 session-forge 二进制（安装: curl -L … 或放置于 ~/.local/bin/session-forge）`,
-    );
+  // Probe; auto-deploy the bundled linux agent when missing.
+  const api = channelApi(channel, transport);
+  const ensured = await ensureAgent(api);
+  if (!ensured.ok) {
+    summary.issues.push(ensured.error);
     return summary;
   }
 
   // Stream the agent's JSONL output line by line — never buffered whole.
   const maxRev = store.maxRevFor(toolId);
-  if (!transport.execStream) {
-    summary.issues.push("wsl-agent: transport cannot execStream");
-    return summary;
-  }
   const seenIds = new Set<string>();
-  const adapter = adapterForSource(toolId, "win32");
+  const adapter = adapterForSource(toolId, (await transport.host()).platform);
   const BATCH = 50;
   let batch: { session: NirSessionLike; rev: number }[] = [];
   const flush = () => {
     if (!batch.length) return;
     store.transaction(() => {
       for (const b of batch) {
-        const result = store.upsert(b.session, "wsl-agent", b.rev);
+        const result = store.upsert(b.session, "agent", b.rev);
         summary[result.status]++;
       }
     });
     batch = [];
   };
-  const stream = await transport.execStream(
+  const stream = await api.execStream(
     [
-      "wsl.exe",
-      "-d",
-      distro,
-      "--",
-      agentBin,
+      ensured.bin,
       "scan-jsonl",
       "--tools",
       "opencode",
@@ -404,20 +372,21 @@ async function scanGroupViaWslAgent(
       try {
         parsed = JSON.parse(t);
       } catch {
-        summary.issues.push("wsl-agent: unparsable line");
+        summary.issues.push("agent: unparsable line");
         return;
       }
       if (!parsed.session) return;
       summary.sessions++;
       seenIds.add(parsed.session.id);
-      // The agent runs inside the guest and stamps sessions with its local
-      // source ("opencode"); rebrand to the overlay toolId so rows land under
-      // opencode@wsl-<distro> (machine card, rev watermark, prune all key on it).
+      // The agent runs on the source machine and stamps sessions with its
+      // local source ("opencode"); rebrand to the overlay toolId so rows land
+      // under opencode@wsl-<distro> / opencode@<remote> (machine card, rev
+      // watermark and prune all key on it).
       if (parsed.session.source !== toolId) {
         parsed.session = { ...parsed.session, source: toolId };
       }
-      // Same root/localPath plumbing as the normal scan path, evaluated on
-      // the Windows side (UNC probing via the adapter).
+      // Same root/localPath plumbing as the normal scan path. SSH remotes
+      // stay native-only (no local twin); WSL guests get the UNC twin.
       if (parsed.session.projectPath) {
         const root = await resolveProjectRoot(transport, adapter, parsed.session.projectPath);
         const local = adapter.local(root);
@@ -438,7 +407,7 @@ async function scanGroupViaWslAgent(
   );
   flush();
   if (stream.exitCode !== 0 && summary.sessions === 0) {
-    summary.issues.push(`wsl-agent: ${stream.stderr.slice(0, 200) || `exit ${stream.exitCode}`}`);
+    summary.issues.push(`agent: ${stream.stderr.slice(0, 200) || `exit ${stream.exitCode}`}`);
     return summary;
   }
   // Prune ONLY on full scans: an incremental pass (--since watermark) sees a

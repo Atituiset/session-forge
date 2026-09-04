@@ -46,6 +46,9 @@
     "externalBin": [
       "binaries/session-forge-engine"
     ],
+    "resources": {
+      "binaries/session-forge-linux-x64-agent": "resources/session-forge-linux-x64-agent"
+    },
     "windows": {
       "nsis": {
         "installMode": "currentUser",
