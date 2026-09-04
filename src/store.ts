@@ -205,6 +205,7 @@ export class Store {
     offset: number;
     source?: string;
     machine?: string;
+    project?: string;
     q?: string;
   }): {
     sessions: SessionSummary[];
@@ -212,6 +213,11 @@ export class Store {
   } {
     const where: string[] = [];
     const params: string[] = [];
+    if (opts.project) {
+      // Exact project root match (project cards drill in by root path).
+      where.push("project_path = ?");
+      params.push(opts.project);
+    }
     if (opts.source) {
       // Base tool match: "codex" covers both local "codex" and remote
       // "codex@host" rows.
@@ -253,6 +259,32 @@ export class Store {
       source: string;
     }[];
     return rows.map((r) => r.source);
+  }
+
+  /** Project cards for the session browser: one row per project root. */
+  listProjects(opts?: { machine?: string; q?: string }): ProjectCard[] {
+    const where: string[] = ["project_path IS NOT NULL", "project_path != ''"];
+    const params: string[] = [];
+    if (opts?.machine) applyMachineFilter(opts.machine, where, params);
+    if (opts?.q) {
+      const pattern = `%${opts.q.replace(/([%_\\])/g, "\\$1")}%`;
+      where.push("(project_path LIKE ? ESCAPE '\\' OR local_path LIKE ? ESCAPE '\\')");
+      params.push(pattern, pattern);
+    }
+    return this.db
+      .prepare(
+        `SELECT project_path AS project, local_path AS localPath,
+                COUNT(*) AS sessions,
+                COUNT(DISTINCT source) AS tools,
+                SUM(tokens_in) AS tokensIn,
+                MIN(started_at) AS firstAt,
+                MAX(started_at) AS lastAt
+         FROM sessions WHERE ${where.join(" AND ")}
+         GROUP BY project_path, local_path
+         ORDER BY lastAt IS NULL, lastAt DESC
+         LIMIT 500`,
+      )
+      .all(...params) as ProjectCard[];
   }
 
   /**
@@ -349,6 +381,16 @@ export interface MachineSummary {
   tokensOut: number;
   additions: number;
   deletions: number;
+}
+
+export interface ProjectCard {
+  project: string;
+  localPath: string | null;
+  sessions: number;
+  tools: number;
+  tokensIn: number;
+  firstAt: string | null;
+  lastAt: string | null;
 }
 
 export function defaultStorePath(): string {

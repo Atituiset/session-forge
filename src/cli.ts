@@ -358,11 +358,8 @@ program
           process.exitCode = 1;
           return;
         }
-        if (session.source.includes("@")) {
-          console.error("远程机器的会话暂不支持接力（需在那台机器上操作）。");
-          process.exitCode = 1;
-          return;
-        }
+        // Overlay sources (@wsl-*/@windows-host) relay fine — the projection
+        // lands in THIS machine's tool homes.
         const result = relaySession(session, opts.to, {
           force: opts.force,
           withNote: opts.note,
@@ -513,6 +510,16 @@ program
           })),
         });
       }
+      if (url.pathname === "/api/projects") {
+        const machine = url.searchParams.get("machine");
+        const q = url.searchParams.get("q");
+        return Response.json({
+          projects: store.listProjects({
+            machine: machine || undefined,
+            q: q || undefined,
+          }),
+        });
+      }
       if (url.pathname === "/api/sessions" && req.method === "GET") {
         const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
         const offset = Math.max(Number(url.searchParams.get("offset")) || 0, 0);
@@ -522,6 +529,7 @@ program
             offset,
             source: url.searchParams.get("source") ?? undefined,
             machine: url.searchParams.get("machine") ?? undefined,
+            project: url.searchParams.get("project") ?? undefined,
             q: url.searchParams.get("q") ?? undefined,
           }),
           sources: store.distinctSources(),
@@ -544,15 +552,13 @@ program
         if (!body.source || !body.id || !body.to) {
           return Response.json({ error: "source, id and to are required" }, { status: 400 });
         }
-        if (body.source.includes("@")) {
-          return Response.json(
-            { error: "远程机器的会话暂不支持接力（请在对应机器上操作）" },
-            { status: 400 },
-          );
-        }
         const session = store.getSession(body.source, body.id);
         if (!session) return Response.json({ error: "session not found" }, { status: 404 });
         try {
+          // Relaying overlay/remote sources is fine: the projection is
+          // installed into THIS machine's ~/.<tool> directories so the local
+          // CLI can resume it. (Rejected in 0.1.18 — that guard hid the
+          // feature for wsl-*/windows-host sessions, the main browsing path.)
           const result = relaySession(session, body.to, { force: body.force === true });
           return Response.json({ ok: true, ...result });
         } catch (err) {

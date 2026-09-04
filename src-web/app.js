@@ -126,6 +126,12 @@ function setMachineScope(scope) {
   sessionsQuery.offset = 0;
   renderMachineCards();
   loadData().catch(() => {});
+  // 机器切换回项目卡片网格（当前项目视图属于旧机器范围）
+  projectScope = null;
+  $("project-back").style.display = "none";
+  $("project-crumb").style.display = "none";
+  $("session-search").value = "";
+  $("session-search").placeholder = "搜索项目名…";
   loadSessions();
 }
 
@@ -455,13 +461,14 @@ $("btn-ssh-import").onclick = async () => {
   }
 };
 
-/* ── 会话浏览：按项目分组 + 机器切换 + 详情浮层 ── */
+/* ── 会话浏览：项目卡片 → 项目内 session 平铺（日期分组）+ 模糊查询 ── */
 const sessionsQuery = { q: "", source: "", machine: "", offset: 0 };
 let sessionsTotal = 0;
 let lastSessionsPayload = null;
 let openSession = null;
 const SESSION_PAGE = 50;
-const collapsedProjects = new Set();
+// 项目态导航：null = 项目卡片网格；字符串 = 已进入该项目
+let projectScope = null;
 
 // Remote rows carry the machine in the source: "codex@devbox" (host may
 // itself contain @, e.g. "codex@ops@10.0.0.1" → machine "ops@10.0.0.1").
@@ -476,15 +483,38 @@ const fmtTime = (iso) => {
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
+const fmtDay = (iso) => {
+  if (!iso) return "未知日期";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "未知日期";
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
+const basename = (p) => (p ? p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p : "");
+
 async function loadSessions() {
-  const params = new URLSearchParams({ limit: String(SESSION_PAGE), offset: String(sessionsQuery.offset) });
-  if (sessionsQuery.q) params.set("q", sessionsQuery.q);
-  if (sessionsQuery.source) params.set("source", sessionsQuery.source);
-  if (sessionsQuery.machine) params.set("machine", sessionsQuery.machine);
-  try {
-    const j = await (await fetch(`${API}/api/sessions?${params}`)).json();
-    renderSessions(j);
-  } catch {}
+  if (projectScope) {
+    const params = new URLSearchParams({ limit: String(SESSION_PAGE), offset: String(sessionsQuery.offset) });
+    if (sessionsQuery.q) params.set("q", sessionsQuery.q);
+    if (sessionsQuery.source) params.set("source", sessionsQuery.source);
+    params.set("project", projectScope);
+    try {
+      const j = await (await fetch(`${API}/api/sessions?${params}`)).json();
+      renderSessions(j);
+    } catch {}
+  } else {
+    const params = new URLSearchParams({ limit: "1", offset: "0" });
+    if (sessionsQuery.machine) params.set("machine", sessionsQuery.machine);
+    if (sessionsQuery.q) params.set("q", sessionsQuery.q);
+    try {
+      const [sess, projs] = await Promise.all([
+        fetch(`${API}/api/sessions?${params}`).then((r) => r.json()),
+        fetch(`${API}/api/projects?${params.toString()}`).then((r) => r.json()),
+      ]);
+      renderProjectGrid(projs.projects ?? [], sess.total ?? 0, sess.sources);
+    } catch {}
+  }
 }
 
 function fillFilterSelects(sources) {
@@ -496,6 +526,65 @@ function fillFilterSelects(sources) {
     tools.map((t) => `<option value="${esc(t)}"${t === toolPrev ? " selected" : ""}>${esc(t)}</option>`).join("");
 }
 
+/* 项目态：卡片网格 */
+function renderProjectGrid(projects, totalSessions, sources) {
+  $("session-count").textContent = projects.length ? `${projects.length}` : "";
+  $("project-back").style.display = "none";
+  $("project-crumb").style.display = "none";
+  $("session-search").placeholder = "搜索项目名…";
+  if (sources) fillFilterSelects(sources);
+  // 工具下拉在项目态无意义，禁用
+  $("session-source").disabled = true;
+  const el = $("sessions");
+  if (!projects.length) {
+    el.innerHTML = `<div class="remote-empty">${sessionsQuery.q ? "没有匹配的项目" : "暂无项目数据，先扫描一次"}</div>`;
+  } else {
+    el.innerHTML = `<div class="proj-grid">${projects.map((p) => {
+      const name = basename(p.project);
+      const when = p.lastAt ? fmtTime(p.lastAt).slice(0, 5) : "—";
+      return `<div class="proj-card" data-project="${esc(p.project)}" title="${esc(p.project)}${p.localPath ? `\n${esc(p.localPath)}` : ""}">
+        <div class="pname">${esc(name)}</div>
+        <div class="psub" title="${esc(p.project)}">${esc(short(p.project, 40))}</div>
+        <div class="pstats">
+          <span><b>${p.sessions}</b> 会话</span>
+          <span><b>${fmt(p.tokensIn ?? 0)}</b> tok</span>
+          <span class="when">${esc(when)}</span>
+        </div>
+      </div>`;
+    }).join("")}</div>`;
+    el.querySelectorAll(".proj-card").forEach((c) => {
+      c.onclick = () => enterProject(c.dataset.project ?? "");
+    });
+  }
+  $("session-prev").disabled = true;
+  $("session-next").disabled = true;
+  $("session-page-info").textContent = totalSessions ? `共 ${totalSessions} 会话 · ${projects.length} 项目` : "";
+}
+
+function enterProject(project) {
+  projectScope = project;
+  sessionsQuery.q = "";
+  sessionsQuery.offset = 0;
+  $("session-search").value = "";
+  $("session-search").placeholder = "搜索会话 id…";
+  $("session-source").disabled = false;
+  $("project-back").style.display = "";
+  $("project-crumb").style.display = "";
+  $("project-crumb").textContent = basename(project) || project;
+  $("project-crumb").title = project;
+  loadSessions();
+}
+
+function exitProject() {
+  projectScope = null;
+  sessionsQuery.q = "";
+  sessionsQuery.offset = 0;
+  $("session-search").value = "";
+  $("session-source").disabled = true;
+  loadSessions();
+}
+
+/* 项目内：按日期分组的 session 平铺 */
 function renderSessions(j) {
   const list = j.sessions ?? [];
   lastSessionsPayload = j;
@@ -506,22 +595,17 @@ function renderSessions(j) {
   if (!list.length) {
     el.innerHTML = `<div class="remote-empty">没有匹配的会话</div>`;
   } else {
-    // Group by project, keeping the engine's newest-first ordering: a project
-    // ranks by its most recent session.
+    // 日期分组（同日内按时间倒序——引擎已按 started_at DESC）
     const groups = new Map();
     for (const s of list) {
-      const key = s.projectPath || "";
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(s);
+      const day = fmtDay(s.startedAt);
+      if (!groups.has(day)) groups.set(day, []);
+      groups.get(day).push(s);
     }
-    el.innerHTML = [...groups.entries()].map(([proj, rows]) => {
-      const tokens = rows.reduce((sum, s) => sum + (s.tokensIn || 0), 0);
-      const closed = collapsedProjects.has(proj);
-      const name = proj ? short(proj, 52) : "(无项目路径)";
-      const twin = rows.find((s) => s.localPath && s.localPath !== proj)?.localPath;
+    el.innerHTML = [...groups.entries()].map(([day, rows]) => {
       const body = rows.map((s) => {
         const machine = machineOf(s.source);
-        return `<div class="session-row" data-source="${esc(s.source)}" data-id="${esc(s.id)}" title="${esc(s.projectPath ?? "")}${twin ? `\n${esc(twin)}` : ""}">
+        return `<div class="session-row" data-source="${esc(s.source)}" data-id="${esc(s.id)}" title="${esc(s.projectPath ?? "")}${s.localPath ? `\n${esc(s.localPath)}` : ""}">
           <span class="chip">${esc(baseTool(s.source))}</span>
           <div class="meta">
             <span class="proj">${esc(short(s.id, 38))}</span>
@@ -530,22 +614,8 @@ function renderSessions(j) {
           <div class="stats">${s.rounds} 轮<b>${fmt(s.tokensIn)} tok</b></div>
         </div>`;
       }).join("");
-      return `<div class="proj-group${closed ? " closed" : ""}" data-proj="${esc(proj)}">
-        <div class="proj-head"><span class="arrow">▾</span>
-          <span class="pname" title="${esc(proj)}">${esc(name)}</span>
-          <span class="pstats">${rows.length} 会话 · ${fmt(tokens)} tok</span>
-        </div>
-        <div class="proj-body">${body}</div>
-      </div>`;
+      return `<div class="date-head">${esc(day)}</div>${body}`;
     }).join("");
-    el.querySelectorAll(".proj-head").forEach((h) => {
-      h.onclick = () => {
-        const key = h.parentElement.dataset.proj ?? "";
-        if (collapsedProjects.has(key)) collapsedProjects.delete(key);
-        else collapsedProjects.add(key);
-        if (lastSessionsPayload) renderSessions(lastSessionsPayload);
-      };
-    });
     el.querySelectorAll(".session-row").forEach((r) => {
       r.onclick = () => openSessionDetail(r.dataset.source, r.dataset.id);
     });
@@ -644,13 +714,13 @@ const RELAY_TARGETS = [
 ];
 
 function relayControlsHtml(j) {
-  // Remote sessions can only be relayed on the machine they live on.
-  if (machineOf(j.source)) return "";
+  // All sessions are relayable: overlay (@wsl-*) and remote projections land
+  // in this engine's own ~/.<tool> homes, so the local CLI can resume them.
   const options = RELAY_TARGETS.filter((t) => t.id !== baseTool(j.source))
     .map((t) => `<option value="${esc(t.id)}">${esc(t.label)}</option>`)
     .join("");
   if (!options) return "";
-  return `<span class="relay-box" title="把本会话投影进另一个 CLI，token 用完后换工具继续">
+  return `<span class="relay-box" title="把本会话投影进本机的另一个 CLI，token 用完后换工具继续">
     <select id="relay-target">${options}</select>
     <button class="mini-btn" id="btn-relay" type="button">接力 →</button>
   </span>`;
@@ -764,6 +834,7 @@ $("session-search").addEventListener("input", () => {
     loadSessions();
   }, 300);
 });
+$("project-back").onclick = exitProject;
 $("session-source").onchange = () => {
   sessionsQuery.source = $("session-source").value;
   sessionsQuery.offset = 0;

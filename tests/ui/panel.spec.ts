@@ -291,6 +291,19 @@ async function ensureScanned(): Promise<void> {
   throw new Error("scan did not finish");
 }
 
+/** Session browsing is project-first: open a project card by its name. */
+async function enterProject(page: import("@playwright/test").Page, name: string): Promise<void> {
+  const card = page.locator(".proj-card", { hasText: name }).first();
+  await expect(card).toBeVisible({ timeout: 15_000 });
+  await card.click();
+  await expect(page.locator(".session-row").first()).toBeVisible({ timeout: 10_000 });
+}
+
+/** Enter the project that carries the claude-code fixture session. */
+async function enterAlphaProject(page: import("@playwright/test").Page): Promise<void> {
+  await enterProject(page, "proj-alpha");
+}
+
 test.describe("session detail", () => {
   test.beforeAll(ensureScanned);
 
@@ -300,8 +313,8 @@ test.describe("session detail", () => {
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
     await page.goto(PANEL);
+    await enterAlphaProject(page);
     const row = page.locator(".session-row").first();
-    await expect(row).toBeVisible({ timeout: 15_000 });
     await row.click();
     await expect(page.locator("#session-overlay.show")).toBeVisible();
     await expect(page.locator("#session-detail .msg").first()).toBeVisible({ timeout: 10_000 });
@@ -312,6 +325,7 @@ test.describe("session detail", () => {
   test("open thinking/tool details survive the 15s live refresh", async ({ page }) => {
     test.setTimeout(60_000);
     await page.goto(PANEL);
+    await enterAlphaProject(page);
     await page.locator(".session-row", { hasText: "claude-code" }).first().click();
     const details = page.locator("#session-detail .msg details").first();
     await expect(details).toBeVisible({ timeout: 10_000 });
@@ -408,12 +422,71 @@ test.describe("engine source switcher", () => {
   });
 });
 
+test.describe("project-first session browser", () => {
+  test.beforeAll(ensureScanned);
+
+  test("grid shows project cards with session/token stats; drilling in groups by date", async ({
+    page,
+  }) => {
+    await page.goto(PANEL);
+    expect(await page.locator(".proj-card").count()).toBeGreaterThanOrEqual(2); // alpha + beta
+    const card = page.locator(".proj-card", { hasText: "proj-alpha" }).first();
+    await expect(card).toContainText("会话");
+    await card.click();
+    // breadcrumb + back button appear; sessions are grouped under date heads
+    await expect(page.locator("#project-crumb")).toHaveText("proj-alpha");
+    await expect(page.locator(".date-head").first()).toBeVisible();
+    expect(await page.locator(".session-row").count()).toBeGreaterThanOrEqual(1);
+    // back returns to the project grid
+    await page.click("#project-back");
+    await expect(page.locator(".proj-card").first()).toBeVisible();
+    await expect(page.locator(".date-head")).toHaveCount(0);
+  });
+
+  test("project-name fuzzy search filters the grid", async ({ page }) => {
+    await page.goto(PANEL);
+    const card = page.locator(".proj-card", { hasText: "proj-alpha" }).first();
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    await page.fill("#session-search", "alpha");
+    await page.waitForTimeout(600);
+    await expect(page.locator(".proj-card")).toHaveCount(1);
+    await page.fill("#session-search", "zzz-no-such-project");
+    await page.waitForTimeout(600);
+    await expect(page.locator(".proj-card")).toHaveCount(0);
+    await expect(page.locator("#sessions")).toContainText("没有匹配的项目");
+  });
+
+  test("inside a project, session-id search narrows the list", async ({ page }) => {
+    await page.goto(PANEL);
+    await enterAlphaProject(page);
+    await page.fill("#session-search", "e2e-1");
+    await page.waitForTimeout(600);
+    const rows = page.locator(".session-row");
+    expect(await rows.count()).toBeGreaterThanOrEqual(1);
+    await expect(rows.first()).toContainText("session-e2e-1");
+  });
+
+  test("/api/projects returns per-project aggregates honoring machine scope", async () => {
+    const j = (await (await fetch(`${API}/api/projects`)).json()) as {
+      projects: { project: string; sessions: number }[];
+    };
+    const alpha = j.projects.find((p) => p.project === "/home/ci/proj-alpha");
+    expect(alpha).toBeDefined();
+    expect(alpha?.sessions).toBeGreaterThanOrEqual(1);
+    const none = (await (await fetch(`${API}/api/projects?machine=ghost`)).json()) as {
+      projects: unknown[];
+    };
+    expect(none.projects).toEqual([]);
+  });
+});
+
 test.describe("relay (projection to another CLI)", () => {
   test.beforeAll(ensureScanned);
 
   test("claude-code session relays to codex and shows the resume hint", async ({ page }) => {
     const fs = await import("node:fs");
     await page.goto(PANEL);
+    await enterAlphaProject(page);
     const row = page.locator(".session-row", { hasText: "claude-code" }).first();
     await expect(row).toBeVisible({ timeout: 15_000 });
     await row.click();
@@ -440,6 +513,7 @@ test.describe("relay (projection to another CLI)", () => {
   test("relay result survives the 15s live refresh", async ({ page }) => {
     test.setTimeout(60_000);
     await page.goto(PANEL);
+    await enterAlphaProject(page);
     const row = page.locator(".session-row", { hasText: "claude-code" }).first();
     await row.click();
     await expect(page.locator("#btn-relay")).toBeVisible({ timeout: 10_000 });

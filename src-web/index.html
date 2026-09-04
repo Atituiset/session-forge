@@ -303,6 +303,21 @@
   .proj-group.closed .proj-body { display: none; }
   .session-row .machine { font-size: 10px; color: var(--amber); }
 
+  /* ── 项目卡片网格 ─────────────────────── */
+  .proj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+  .proj-card { border: 1px solid var(--line); border-radius: 11px; padding: 11px 13px; cursor: pointer;
+    background: rgba(14,21,38,.4); transition: border-color .18s, transform .18s; position: relative; overflow: hidden; }
+  .proj-card:hover { border-color: rgba(34,211,238,.4); transform: translateY(-2px); }
+  .proj-card .pname { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--txt);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .proj-card .psub { font-family: var(--mono); font-size: 10px; color: var(--dim); margin-top: 5px; }
+  .proj-card .pstats { display: flex; gap: 8px; margin-top: 8px; font-family: var(--mono); font-size: 10.5px; }
+  .proj-card .pstats b { color: var(--cyan); font-weight: 500; }
+  .proj-card .pstats .when { margin-left: auto; color: var(--dim); }
+  .date-head { font-family: var(--mono); font-size: 11px; color: var(--violet); letter-spacing: 1px;
+    margin: 12px 0 7px; display: flex; align-items: center; gap: 8px; }
+  .date-head::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
   /* ── 会话详情浮层 ─────────────────────── */
   .overlay { position: fixed; inset: 0; z-index: 50; display: none;
     align-items: center; justify-content: center;
@@ -438,10 +453,12 @@
         <table id="projects"></table>
       </div>
       <div class="card">
-        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>会话浏览 <span class="count-pill" id="session-count"></span></h2>
+        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>会话浏览 · 项目 <span class="count-pill" id="session-count"></span></h2>
         <div class="session-tools">
+          <button class="mini-btn" id="project-back" type="button" style="display:none">‹ 项目列表</button>
+          <span id="project-crumb" style="font-family:var(--mono);font-size:12px;color:var(--cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:none"></span>
           <select id="session-source"><option value="">全部工具</option></select>
-          <input id="session-search" placeholder="搜索项目或会话 id…" />
+          <input id="session-search" placeholder="搜索项目名 / 会话 id…" />
         </div>
         <div class="session-list" id="sessions"></div>
         <div class="session-pager">
