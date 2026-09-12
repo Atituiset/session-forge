@@ -308,10 +308,17 @@ export class Store {
   }
 
   /** Project cards for the session browser: one row per project root. */
-  listProjects(opts?: { machine?: string; q?: string }): ProjectCard[] {
+  listProjects(opts?: { machine?: string; source?: string; q?: string }): ProjectCard[] {
     const where: string[] = ["project_path IS NOT NULL", "project_path != ''"];
     const params: string[] = [];
     if (opts?.machine) applyMachineFilter(opts.machine, where, params);
+    if (opts?.source) {
+      // Base tool match: "codex" covers both local "codex" and remote
+      // "codex@host" rows (same rule as listSessionsPage).
+      const tool = opts.source.replace(/([%_\\])/g, "\\$1");
+      where.push("(source = ? OR source LIKE ? ESCAPE '\\')");
+      params.push(opts.source, `${tool}@%`);
+    }
     if (opts?.q) {
       const pattern = `%${opts.q.replace(/([%_\\])/g, "\\$1")}%`;
       where.push("(project_path LIKE ? ESCAPE '\\' OR local_path LIKE ? ESCAPE '\\')");
@@ -319,14 +326,17 @@ export class Store {
     }
     return this.db
       .prepare(
-        `SELECT project_path AS project, local_path AS localPath,
+        // One card per project root regardless of how many tools opened it:
+        // local_path differs per source (cross-boundary twin vs NULL), so
+        // grouping by it would split one project into several cards.
+        `SELECT project_path AS project, MAX(local_path) AS localPath,
                 COUNT(*) AS sessions,
                 COUNT(DISTINCT source) AS tools,
                 SUM(tokens_in) AS tokensIn,
                 MIN(started_at) AS firstAt,
                 MAX(started_at) AS lastAt
          FROM sessions WHERE ${where.join(" AND ")}
-         GROUP BY project_path, local_path
+         GROUP BY project_path
          ORDER BY lastAt IS NULL, lastAt DESC
          LIMIT 500`,
       )

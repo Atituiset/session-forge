@@ -507,6 +507,7 @@ async function loadSessions() {
     const params = new URLSearchParams({ limit: "1", offset: "0" });
     if (sessionsQuery.machine) params.set("machine", sessionsQuery.machine);
     if (sessionsQuery.q) params.set("q", sessionsQuery.q);
+    if (sessionsQuery.source) params.set("source", sessionsQuery.source);
     try {
       const [sess, projs] = await Promise.all([
         fetch(`${API}/api/sessions?${params}`).then((r) => r.json()),
@@ -533,8 +534,7 @@ function renderProjectGrid(projects, totalSessions, sources) {
   $("project-crumb").style.display = "none";
   $("session-search").placeholder = "搜索项目名…";
   if (sources) fillFilterSelects(sources);
-  // 工具下拉在项目态无意义，禁用
-  $("session-source").disabled = true;
+  // 工具下拉在项目态同样可用：按工具过滤项目卡片
   const el = $("sessions");
   if (!projects.length) {
     el.innerHTML = `<div class="remote-empty">${sessionsQuery.q ? "没有匹配的项目" : "暂无项目数据，先扫描一次"}</div>`;
@@ -580,7 +580,6 @@ function exitProject() {
   sessionsQuery.q = "";
   sessionsQuery.offset = 0;
   $("session-search").value = "";
-  $("session-source").disabled = true;
   loadSessions();
 }
 

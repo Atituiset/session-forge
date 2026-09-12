@@ -298,6 +298,54 @@ describe("store", () => {
     store.close();
   });
 
+  test("listProjects merges one project across tools and filters by base tool", () => {
+    const store = new Store(path.join(dir, "cache-projects.db"));
+    const mk = (
+      id: string,
+      source: string,
+      projectPath: string,
+      localPath?: string,
+    ): NirSession => ({
+      id,
+      source,
+      sourceVersion: null,
+      projectPath,
+      startedAt: "2026-08-01T00:00:00Z",
+      endedAt: null,
+      messages: [
+        {
+          role: "user",
+          content: "x",
+          timestamp: null,
+          toolName: null,
+          toolInput: null,
+          model: null,
+          thinking: null,
+        },
+      ],
+      rawMeta: localPath ? { localPath } : {},
+    });
+    // Same project root opened by two CLIs; one row carries a cross-boundary
+    // local_path twin, the other doesn't — must still collapse to one card.
+    store.upsert(mk("a1", "claude-code", "/p/alpha"), "f", 1);
+    store.upsert(mk("a2", "codex@wsl", "/p/alpha", "C:/p/alpha"), "f", 1);
+    store.upsert(mk("b1", "codex", "/p/beta"), "f", 1);
+    const all = store.listProjects();
+    expect(all.map((p) => p.project).sort()).toEqual(["/p/alpha", "/p/beta"]);
+    const alpha = all.find((p) => p.project === "/p/alpha");
+    expect(alpha?.sessions).toBe(2);
+    expect(alpha?.tools).toBe(2);
+    expect(alpha?.localPath).toBe("C:/p/alpha");
+    const codex = store.listProjects({ source: "codex" });
+    expect(codex.map((p) => p.project).sort()).toEqual(["/p/alpha", "/p/beta"]);
+    expect(codex.find((p) => p.project === "/p/alpha")?.sessions).toBe(1);
+    expect(store.listProjects({ source: "claude-code" }).map((p) => p.project)).toEqual([
+      "/p/alpha",
+    ]);
+    expect(store.listProjects({ source: "ghost" })).toEqual([]);
+    store.close();
+  });
+
   test("listSessions machine option scopes dashboard rows the same way", () => {
     const store = new Store(path.join(dir, "cache-dash.db"));
     const mk = (id: string, source: string): NirSession => ({

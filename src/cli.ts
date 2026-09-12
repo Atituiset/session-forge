@@ -549,6 +549,7 @@ program
         return Response.json({
           projects: store.listProjects({
             machine: machine || undefined,
+            source: url.searchParams.get("source") ?? undefined,
             q: q || undefined,
           }),
         });
