@@ -399,14 +399,15 @@
   <svg class="logo" viewBox="0 0 64 64"><title>SessionForge</title><polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="none" stroke="#22d3ee" stroke-width="4"/><circle cx="32" cy="32" r="7" fill="#fbbf24"/></svg>
   <span class="brand">SESSIONFORGE</span>
   <span class="drag" data-tauri-drag-region></span>
+  <button class="mini-btn" id="lang-toggle" type="button" data-i18n-title="langToggleTitle" style="margin-right:8px">中</button>
   <div class="winbtns">
-    <button class="winbtn" type="button" id="btn-min" title="最小化">
+    <button class="winbtn" type="button" id="btn-min" data-i18n-title="winMin" title="最小化">
       <svg viewBox="0 0 11 11"><title>minimize</title><rect x="0" y="5" width="11" height="1" fill="currentColor"/></svg>
     </button>
-    <button class="winbtn" type="button" id="btn-max" title="放大 / 还原">
+    <button class="winbtn" type="button" id="btn-max" data-i18n-title="winMax" title="放大 / 还原">
       <svg viewBox="0 0 11 11"><title>maximize</title><path d="M1.5 1.5h8v8h-8z M3.5 3.5h4v4h-4z" fill="none" stroke="currentColor" stroke-width="1"/></svg>
     </button>
-    <button class="winbtn close" type="button" id="btn-close" title="最小化到托盘（托盘右键退出）">
+    <button class="winbtn close" type="button" id="btn-close" data-i18n-title="winClose" title="最小化到托盘（托盘右键退出）">
       <svg viewBox="0 0 11 11"><title>close</title><path d="M1 1 L10 10 M10 1 L1 10" stroke="currentColor" stroke-width="1.2"/></svg>
     </button>
   </div>
@@ -416,11 +417,11 @@
   <header class="hero">
     <h1>
       <svg class="hexmark" viewBox="0 0 64 64"><defs><linearGradient id="hg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a78bfa"/></linearGradient></defs><polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="none" stroke="url(#hg)" stroke-width="4"/><polygon points="32,17 43,24 43,40 32,47 21,40 21,24" fill="rgba(34,211,238,.08)" stroke="rgba(167,139,250,.5)" stroke-width="1.5"/><circle cx="32" cy="32" r="5.5" fill="#fbbf24"/></svg>
-      认知资产面板
+      <span data-i18n="appTitle">认知资产面板</span>
     </h1>
-    <span class="livepill" id="engine-pill"><i></i><span id="engine-pill-text">检测引擎…</span></span>
+    <span class="livepill" id="engine-pill"><i></i><span id="engine-pill-text" data-i18n="engineDetecting">检测引擎…</span></span>
     <div class="engine-menu">
-      <button class="engine-chip" id="engine-chip" type="button" title="选择数据来自哪个 SessionForge 引擎">引擎 · <span id="engine-chip-label">本机默认</span> ▾</button>
+      <button class="engine-chip" id="engine-chip" type="button" data-i18n-title="engineChipTitle" title="选择数据来自哪个 SessionForge 引擎"><span data-i18n="engineChipPrefix">引擎</span> · <span id="engine-chip-label">本机默认</span> ▾</button>
       <details class="engine-pop" id="engine-pop">
         <summary></summary>
         <div class="engine-pop-body" id="engine-pop-body"></div>
@@ -429,11 +430,11 @@
     <div class="hero-actions">
       <button class="act primary" id="btn-scan" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3.4"/></svg>
-        扫描全部 Agent
+        <span data-i18n="btnScan">扫描全部 Agent</span>
       </button>
       <button class="act" id="btn-export" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M4 19h16"/></svg>
-        导出知识库
+        <span data-i18n="btnExport">导出知识库</span>
       </button>
     </div>
   </header>
@@ -445,25 +446,25 @@
   <div class="grid-main">
     <div class="col">
       <div class="card">
-        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 20h18M6 16v-5M11 16V7M16 16v-8M21 16V4"/></svg>编码活跃度 · 近期按日会话数</h2>
+        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 20h18M6 16v-5M11 16V7M16 16v-8M21 16V4"/></svg><span data-i18n="chartActivity">编码活跃度 · 近期按日会话数</span></h2>
         <div class="bars" id="activity"></div>
       </div>
       <div class="card">
-        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h8l6 6v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg>项目热度榜 · 按 Token 消耗</h2>
+        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h8l6 6v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg><span data-i18n="chartProjects">项目热度榜 · 按 Token 消耗</span></h2>
         <table id="projects"></table>
       </div>
       <div class="card">
-        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>会话浏览 · 项目 <span class="count-pill" id="session-count"></span></h2>
+        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span data-i18n="chartSessions">会话浏览 · 项目</span> <span class="count-pill" id="session-count"></span></h2>
         <div class="session-tools">
-          <button class="mini-btn" id="project-back" type="button" style="display:none">‹ 项目列表</button>
+          <button class="mini-btn" id="project-back" type="button" style="display:none" data-i18n="backToProjects">‹ 项目列表</button>
           <span id="project-crumb" style="font-family:var(--mono);font-size:12px;color:var(--cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:none"></span>
-          <select id="session-source"><option value="">全部工具</option></select>
-          <input id="session-search" placeholder="搜索项目名 / 会话 id…" />
+          <select id="session-source"><option value="" data-i18n="allTools">全部工具</option></select>
+          <input id="session-search" data-i18n-ph="searchProjectOrIdPh" placeholder="搜索项目名 / 会话 id…" />
         </div>
         <div class="session-list" id="sessions"></div>
         <div class="session-pager">
-          <button class="mini-btn" id="session-prev" type="button">上一页</button>
-          <button class="mini-btn" id="session-next" type="button">下一页</button>
+          <button class="mini-btn" id="session-prev" type="button" data-i18n="prevPage">上一页</button>
+          <button class="mini-btn" id="session-next" type="button" data-i18n="nextPage">下一页</button>
           <span class="page-info" id="session-page-info"></span>
         </div>
       </div>
@@ -471,33 +472,33 @@
 
     <div class="col">
       <div class="card">
-        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="7" rx="2"/><rect x="2" y="13" width="20" height="7" rx="2"/><path d="M6 7.5h.01M6 16.5h.01"/></svg>远程机器 · SSH 扫描 <span class="count-pill" id="remote-count"></span></h2>
+        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="7" rx="2"/><rect x="2" y="13" width="20" height="7" rx="2"/><path d="M6 7.5h.01M6 16.5h.01"/></svg><span data-i18n="chartRemotes">远程机器 · SSH 扫描</span> <span class="count-pill" id="remote-count"></span></h2>
 
         <details class="add-form" id="remote-form-box">
-          <summary>+ 添加远程机器</summary>
+          <summary data-i18n="addRemoteSummary">+ 添加远程机器</summary>
           <div class="form-grid">
-            <label>名称（可选，如“开发机”） <input id="remote-label" placeholder="留空则显示地址" /></label>
-            <label>主机 <input id="remote-host" placeholder="192.168.1.20 或 host.example.com" /></label>
-            <label>用户名 <input id="remote-user" placeholder="留空则用密钥登录" /></label>
-            <label>密码 <input id="remote-pass" type="password" placeholder="留空则用密钥登录（不落盘）" /></label>
-            <button class="act primary" id="btn-remote-add" type="button">添加机器</button>
+            <label><span data-i18n="remoteLabelName">名称（可选，如“开发机”）</span> <input id="remote-label" data-i18n-ph="remoteLabelPh" placeholder="留空则显示地址" /></label>
+            <label><span data-i18n="remoteHost">主机</span> <input id="remote-host" data-i18n-ph="remoteHostPh" placeholder="192.168.1.20 或 host.example.com" /></label>
+            <label><span data-i18n="remoteUser">用户名</span> <input id="remote-user" data-i18n-ph="remoteUserPh" placeholder="留空则用密钥登录" /></label>
+            <label><span data-i18n="remotePass">密码</span> <input id="remote-pass" type="password" data-i18n-ph="remotePassPh" placeholder="留空则用密钥登录（不落盘）" /></label>
+            <button class="act primary" id="btn-remote-add" type="button" data-i18n="remoteAddBtn">添加机器</button>
           </div>
-          <p class="hint">密码仅保存在本次运行内存中，不会写入磁盘。不填密码时走本机 SSH 密钥认证。</p>
+          <p class="hint" data-i18n="remoteHint">密码仅保存在本次运行内存中，不会写入磁盘。不填密码时走本机 SSH 密钥认证。</p>
         </details>
 
         <div id="remotes"></div>
-        <button class="mini-btn" id="btn-ssh-import" type="button" style="margin-top:4px">从 ~/.ssh/config 导入</button>
+        <button class="mini-btn" id="btn-ssh-import" type="button" style="margin-top:4px" data-i18n="sshImport">从 ~/.ssh/config 导入</button>
       </div>
       <div class="card">
-        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>模型分布</h2>
+        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg><span data-i18n="chartModels">模型分布</span></h2>
         <div class="donut-wrap" id="models-donut"></div>
       </div>
       <div class="card">
-        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2c2 4 6 5.5 6 10a6 6 0 0 1-12 0c0-4.5 4-6 6-10z"/></svg>高频修改文件</h2>
+        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2c2 4 6 5.5 6 10a6 6 0 0 1-12 0c0-4.5 4-6 6-10z"/></svg><span data-i18n="chartFiles">高频修改文件</span></h2>
         <div class="bars" id="files"></div>
       </div>
       <div class="card">
-        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="flame" style="color:var(--amber)"><path d="M12 2c2 4 6 5.5 6 10a6 6 0 0 1-12 0c0-4.5 4-6 6-10z"/></svg>黑洞会话 · 技术债务候选</h2>
+        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="flame" style="color:var(--amber)"><path d="M12 2c2 4 6 5.5 6 10a6 6 0 0 1-12 0c0-4.5 4-6 6-10z"/></svg><span data-i18n="chartBlackholes">黑洞会话 · 技术债务候选</span></h2>
         <table id="blackholes"></table>
       </div>
     </div>
@@ -510,8 +511,9 @@
   <div class="overlay-panel" id="session-detail"></div>
 </div>
 
-<div class="toast" id="toast"><div class="spinner" id="toast-spin"></div><span id="toast-msg">扫描中…</span></div>
+<div class="toast" id="toast"><div class="spinner" id="toast-spin"></div><span id="toast-msg" data-i18n="toastScanning">扫描中…</span></div>
 
+<script src="i18n.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -97,7 +97,6 @@ bun run desktop         # Tauri 桌面端（开发模式）
 
 ## 路线图
 
-- 界面国际化（当前中文优先，英文界面排期中）
 - 会话详情 Markdown 渲染与代码高亮
 - 一行式安装脚本 + brew / scoop / winget 渠道
 

@@ -100,7 +100,6 @@ bun run desktop         # Tauri desktop app (dev)
 
 ## Roadmap
 
-- English UI (the panel is currently Chinese-first — i18n is next)
 - Markdown rendering with code highlighting in the session viewer
 - One-line install script + brew / scoop / winget packages
 

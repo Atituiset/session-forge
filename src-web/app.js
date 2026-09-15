@@ -55,13 +55,15 @@ if (hasTauriBridge) {
   document.querySelector(".winbtns").style.display = "none";
 }
 
+/* ── 语言切换：中文界面显示 EN，英文界面显示 中 ── */
+$("lang-toggle").onclick = () => setLang(currentLang() === "zh-CN" ? "en" : "zh-CN");
 
 function setPill(ok, text) {
   engineOnline = ok;
   const pill = $("engine-pill");
   pill.classList.toggle("offline", !ok);
   // Offline on the desktop app: sidecar stdout/stderr lands in this log.
-  pill.title = ok ? "" : "引擎未响应 · 日志见 ~/.session-forge/engine.log";
+  pill.title = ok ? "" : t("engineOfflineTitle");
   $("engine-pill-text").textContent = text;
   $("btn-scan").disabled = !ok;
 }
@@ -70,10 +72,10 @@ async function checkEngine() {
   try {
     const r = await fetch(`${API}/api/health`, { signal: AbortSignal.timeout(4000) });
     const j = await r.json();
-    setPill(true, j.scanning ? "ENGINE · 扫描中" : "ENGINE ONLINE · 本地数据");
+    setPill(true, j.scanning ? t("engineScanning") : t("engineOnlineLocal"));
     return true;
   } catch {
-    setPill(false, "ENGINE OFFLINE · 引擎未响应");
+    setPill(false, t("engineOffline"));
     return false;
   }
 }
@@ -103,19 +105,19 @@ function renderMachineCards() {
   );
   const card = (scope, name, m, mono, tools) => `
     <div class="machine-card${machineScope === scope ? " active" : ""}" data-machine="${esc(scope)}"
-         title="点击只看${esc(name)}的数据 · 工具: ${esc((tools ?? []).join(", ") || "无")}">
+         title="${esc(t("machineCardTitle", { name, tools: (tools ?? []).join(", ") || t("noneWord") }))}">
       <div class="mname"><span class="dot"></span><span class="label">${esc(name)}</span></div>
-      <div class="mstats"><b>${fmt(m.sessions)}</b> 会话 · <b>${fmt(m.projects)}</b> 项目 · <b>${fmt(m.tokensIn)}</b> tok</div>
+      <div class="mstats"><b>${fmt(m.sessions)}</b> ${esc(t("sessionsUnit", { n: m.sessions }))} · <b>${fmt(m.projects)}</b> ${esc(t("projectsUnit", { n: m.projects }))} · <b>${fmt(m.tokensIn)}</b> tok</div>
       ${mono ? `<div class="mtools">${mono}</div>` : ""}
     </div>`;
-  const chips = (tools) => tools.map((t) => `<span class="chip">${esc(t)}</span>`).join("");
+  const chips = (tools) => tools.map((tool) => `<span class="chip">${esc(tool)}</span>`).join("");
   $("machine-cards").innerHTML =
-    card("", "全部机器", all, chips(all.tools), all.tools) +
+    card("", t("allMachines"), all, chips(all.tools), all.tools) +
     lastMachines
       .map((m) =>
         card(
           m.machine,
-          m.machine === "local" ? "本机" : m.machine,
+          m.machine === "local" ? t("localMachine") : m.machine,
           m,
           chips(m.tools ?? []),
           m.tools ?? [],
@@ -139,7 +141,7 @@ function setMachineScope(scope) {
   $("project-back").style.display = "none";
   $("project-crumb").style.display = "none";
   $("session-search").value = "";
-  $("session-search").placeholder = "搜索项目名…";
+  $("session-search").placeholder = t("searchProjectPh");
   loadSessions();
 }
 
@@ -174,28 +176,28 @@ function renderEngineMenu() {
   // The catalog may lack the API actually in use (e.g. panel opened with
   // ?api= for a remote engine): show it as the first, marked current.
   if (!list.some((e) => e.api === API)) {
-    list.unshift({ label: `当前连接 · ${engineLabel(API)}`, api: API });
+    list.unshift({ label: t("currentEngine", { api: engineLabel(API) }), api: API });
   }
   if (!list.some((e) => e.api === "http://127.0.0.1:4177")) {
-    list.push({ label: "本机默认", api: "http://127.0.0.1:4177" });
+    list.push({ label: t("engineLabelDefault"), api: "http://127.0.0.1:4177" });
   }
   const body = $("engine-pop-body");
   body.innerHTML =
     list
       .map(
         (e) => `<div class="engine-row row${e.api === API ? " cur" : ""}" data-api="${esc(e.api)}">
-          <span>${esc(e.label || engineLabel(e.api))}${e.api === API ? " · 当前" : ""}</span>
-          ${e.api === "http://127.0.0.1:4177" ? "" : `<span class="del" data-del="${esc(e.api)}" title="移除">✕</span>`}
+          <span>${esc(e.label || engineLabel(e.api))}${e.api === API ? esc(t("currentMark")) : ""}</span>
+          ${e.api === "http://127.0.0.1:4177" ? "" : `<span class="del" data-del="${esc(e.api)}" title="${esc(t("removeTitle"))}">✕</span>`}
         </div>`,
       )
       .join("") +
     `<div class="adder">
-      <input id="engine-add-label" placeholder="名字（如 WSL）" />
+      <input id="engine-add-label" placeholder="${esc(t("engineNamePh"))}" />
       <input id="engine-add-api" placeholder="http://localhost:4178" />
-      <button class="mini-btn" id="engine-add-btn" type="button">添加</button>
+      <button class="mini-btn" id="engine-add-btn" type="button">${esc(t("addBtn"))}</button>
     </div>
-    <p class="hint">想看 WSL/WSL2 数据？在 WSL 里运行
-      <code>session-forge serve --port 4178</code>，再把 http://localhost:4178 加进来。</p>`;
+    <p class="hint">${esc(t("engineHintA"))}
+      <code>session-forge serve --port 4178</code>${esc(t("engineHintB"))}</p>`;
   body.querySelectorAll(".engine-row").forEach((row) => {
     row.onclick = (ev) => {
       ev.stopPropagation(); // keep the popover open across in-pop clicks
@@ -244,12 +246,12 @@ document.addEventListener("click", (e) => {
 });
 
 function render(d) {
-  const t = d.totals;
+  const totals = d.totals;
   $("metrics").innerHTML = [
-    ["Sessions", fmt(t.sessions), `${t.projects} 个项目`],
-    ["交互轮次", fmt(t.rounds), "user → assistant 往返"],
-    ["代码变更", `+${fmt(t.additions)}`, `-${fmt(t.deletions)} 行`],
-    ["Token 消耗", fmt(t.tokensIn), `out ${fmt(t.tokensOut)}`],
+    ["Sessions", fmt(totals.sessions), t("metricSessionsSub", { projects: totals.projects })],
+    [t("metricRounds"), fmt(totals.rounds), t("metricRoundsSub")],
+    [t("metricChanges"), `+${fmt(totals.additions)}`, t("metricChangesSub", { deletions: fmt(totals.deletions) })],
+    [t("metricTokens"), fmt(totals.tokensIn), `out ${fmt(totals.tokensOut)}`],
   ].map(([l, v, s]) =>
     `<div class="card metric"><div class="label">${l}</div><div class="value">${v}</div><div class="sub">${s}</div></div>`
   ).join("");
@@ -259,10 +261,10 @@ function render(d) {
     `<div class="bar-row"><span class="name">${a.bucket}</span>
      <div class="bar-track"><div class="bar-fill" style="width:${((a.sessions / maxAct) * 100).toFixed(1)}%"></div></div>
      <span class="num">${a.sessions}</span></div>`
-  ).join("") || `<p style="color:var(--dim)">暂无数据，点击右上角扫描。</p>`;
+  ).join("") || `<p style="color:var(--dim)">${esc(t("noDataScanHint"))}</p>`;
 
   $("projects").innerHTML =
-    `<tr><th>项目</th><th>来源</th><th style="text-align:right">会话</th><th style="text-align:right">变更</th><th style="text-align:right">Tokens</th></tr>` +
+    `<tr><th>${esc(t("thProject"))}</th><th>${esc(t("thSource"))}</th><th style="text-align:right">${esc(t("thSessions"))}</th><th style="text-align:right">${esc(t("thChanges"))}</th><th style="text-align:right">Tokens</th></tr>` +
     d.projects.map((p) =>
       `<tr><td title="${esc(p.projectPath ?? "")}${p.projectLocal ? `\n${esc(p.projectLocal)}` : ""}">${esc(p.project)}${p.projectLocal ? `<div class="sub" style="color:var(--dim);font-size:10px;font-family:var(--mono)">${esc(short(p.projectLocal, 34))}</div>` : ""}</td><td><span class="chip">${esc(p.source)}</span></td>
        <td class="num">${p.sessions}</td><td class="num" style="color:var(--green)">+${fmt(p.additions)}</td>
@@ -279,15 +281,15 @@ function render(d) {
   ).join("");
 
   $("blackholes").innerHTML =
-    `<tr><th>来源</th><th>项目</th><th style="text-align:right">轮次</th></tr>` +
+    `<tr><th>${esc(t("thSource"))}</th><th>${esc(t("thProject"))}</th><th style="text-align:right">${esc(t("thRounds"))}</th></tr>` +
     d.blackholes.map((b) =>
       `<tr><td><span class="chip">${esc(b.source)}</span></td>
        <td title="${esc(b.id)}">${esc(short(b.project || b.id, 26))}</td>
        <td class="num flame" style="text-align:right;font-family:var(--mono);color:var(--amber)">${b.rounds} ⟳</td></tr>`
     ).join("");
 
-  const scopeLabel = machineScope ? (machineScope === "local" ? "本机" : machineScope) : "全部机器";
-  $("foot").textContent = `SESSIONFORGE ENGINE · ${d.generatedAt.replace("T", " ").slice(0, 19)} · 范围: ${scopeLabel} · 未联网`;
+  const scopeLabel = machineScope ? (machineScope === "local" ? t("localMachine") : machineScope) : t("allMachines");
+  $("foot").textContent = `SESSIONFORGE ENGINE · ${d.generatedAt.replace("T", " ").slice(0, 19)} · ${t("scopeLabel")}: ${scopeLabel} · ${t("footerOffline")}`;
 }
 
 function renderDonut(models) {
@@ -316,7 +318,7 @@ function renderDonut(models) {
     `<svg width="124" height="124" style="filter:drop-shadow(0 0 12px rgba(34,211,238,.25))">
        <circle cx="62" cy="62" r="46" fill="none" stroke="rgba(120,160,255,.08)" stroke-width="16"/>${paths}
        <text x="62" y="58" text-anchor="middle" fill="#dbe4ff" font-size="13" font-family="var(--mono)" font-weight="600">${models.length}</text>
-       <text x="62" y="74" text-anchor="middle" fill="#7c8db5" font-size="9">模型</text>
+       <text x="62" y="74" text-anchor="middle" fill="#7c8db5" font-size="9">${esc(t("modelsUnit"))}</text>
      </svg><div class="legend">${legend}</div>`;
 }
 
@@ -332,7 +334,7 @@ async function pollScanDone(btn) {
     } catch {
       continue;
     }
-    $("toast-msg").textContent = `正在扫描本机 Agent… ${(Date.now() - t0) / 1000 | 0}s`;
+    $("toast-msg").textContent = t("scanningElapsed", { s: (Date.now() - t0) / 1000 | 0 });
     if (st.status !== "running") return st;
   }
 }
@@ -349,7 +351,7 @@ async function runScan() {
     if (!res.ok) {
       $("toast-spin").style.display = "none";
       $("toast-msg").textContent =
-        res.status === 409 ? "已有扫描在进行中…" : `触发扫描失败：${j.error ?? res.status}`;
+        res.status === 409 ? t("scanAlreadyRunning") : t("scanStartFailed", { error: j.error ?? res.status });
       return;
     }
     // 202 {status:"started"} — poll until the job finishes.
@@ -357,17 +359,21 @@ async function runScan() {
     $("toast-spin").style.display = "none";
     const sum = done?.summary;
     $("toast-msg").textContent = done?.status === "ok" && sum
-      ? `扫描完成 · ${(sum.durationMs / 1000).toFixed(1)}s · ${sum.tools.filter((t) => t.sessions > 0).length} 个数据源 · 共 ${sum.tools.reduce((s2, t) => s2 + t.sessions, 0)} 会话`
-      : `扫描失败：${done?.error ?? "未知错误"}`;
+      ? t("scanDone", {
+          secs: (sum.durationMs / 1000).toFixed(1),
+          sources: sum.tools.filter((tool) => tool.sessions > 0).length,
+          sessions: sum.tools.reduce((s2, tool) => s2 + tool.sessions, 0),
+        })
+      : t("scanFailed", { error: done?.error ?? t("unknownError") });
     await loadData();
     await loadMachines();
   } catch (e) {
     $("toast-spin").style.display = "none";
-    $("toast-msg").textContent = "引擎未响应，请重启应用";
+    $("toast-msg").textContent = t("engineDead");
   } finally {
     setTimeout(() => {
       $("toast").classList.remove("show");
-      $("toast-msg").textContent = "扫描中…";
+      $("toast-msg").textContent = t("toastScanning");
       $("toast-spin").style.display = "block";
       btn.disabled = !engineOnline;
     }, 2600);
@@ -379,23 +385,23 @@ async function loadRemotes() {
   try {
     const j = await (await fetch(`${API}/api/remotes`)).json();
     const el = $("remotes");
-    $("remote-count").textContent = j.remotes.length ? `${j.remotes.length} 台` : "";
+    $("remote-count").textContent = j.remotes.length ? t("remoteCountUnit", { n: j.remotes.length }) : "";
     if (!j.remotes.length) {
-      el.innerHTML = `<div class="remote-empty">尚未添加远程机器 · 点击上方「添加远程机器」</div>`;
+      el.innerHTML = `<div class="remote-empty">${esc(t("remoteEmpty"))}</div>`;
       return;
     }
     el.innerHTML = j.remotes.map((r) => {
       const job = r.job;
-      let dot = "", status = `<span class="sub">等待扫描${r.hasPassword ? " · 已存密码凭证" : ""}</span>`;
+      let dot = "", status = `<span class="sub">${esc(t("remoteWaiting"))}${r.hasPassword ? esc(t("remoteHasPassword")) : ""}</span>`;
       if (job?.status === "running") {
         dot = ` run`;
-        status = `<span class="chip run">扫描中 ${((Date.now() - job.startedAt) / 1000 | 0)}s</span>`;
+        status = `<span class="chip run">${esc(t("remoteScanning", { s: (Date.now() - job.startedAt) / 1000 | 0 }))}</span>`;
       } else if (job?.status === "ok") {
         dot = ` ok`;
-        status = `<span class="chip ok">完成 · ${esc(String(job.summary ?? ""))} 个数据源 · ${new Date(job.finishedAt).toLocaleTimeString()}</span>`;
+        status = `<span class="chip ok">${esc(t("remoteScanDone", { summary: String(job.summary ?? ""), time: new Date(job.finishedAt).toLocaleTimeString() }))}</span>`;
       } else if (job?.status === "error") {
         dot = ` err`;
-        status = `<span class="chip err" title="${esc(job.error)}">失败：${esc(short(job.error ?? "", 40))}</span>`;
+        status = `<span class="chip err" title="${esc(job.error)}">${esc(t("remoteScanFailed", { error: short(job.error ?? "", 40) }))}</span>`;
       }
       const running = job?.status === "running";
       const address = r.username ? `${r.username}@${r.host}` : r.host;
@@ -407,8 +413,8 @@ async function loadRemotes() {
           ${r.label ? `<span class="sub">${esc(address)}</span>` : ""}
           ${status}
         </div>
-        <button class="mini-btn" type="button" data-scan="${esc(r.name)}" ${running ? "disabled" : ""}>扫描</button>
-        <button class="mini-btn danger" type="button" data-del="${esc(r.name)}">删除</button>
+        <button class="mini-btn" type="button" data-scan="${esc(r.name)}" ${running ? "disabled" : ""}>${esc(t("scanBtn"))}</button>
+        <button class="mini-btn danger" type="button" data-del="${esc(r.name)}">${esc(t("deleteBtn"))}</button>
       </div>`;
     }).join("");
     el.querySelectorAll("[data-scan]").forEach((b) =>
@@ -445,7 +451,7 @@ $("btn-remote-add").onclick = async () => {
   });
   if (!res.ok) {
     const j = await res.json().catch(() => ({}));
-    alert(j.error ?? "添加失败");
+    alert(j.error ?? t("addFailed"));
     return;
   }
   labelEl.value = ""; hostEl.value = ""; userEl.value = ""; passEl.value = "";
@@ -460,12 +466,12 @@ $("btn-ssh-import").onclick = async () => {
   try {
     const res = await fetch(`${API}/api/remotes/import-ssh`, { method: "POST" });
     const j = await res.json().catch(() => ({}));
-    btn.textContent = j.added > 0 ? `已导入 ${j.added} 台` : "没有新的主机";
-    setTimeout(() => { btn.textContent = "从 ~/.ssh/config 导入"; btn.disabled = false; }, 2000);
+    btn.textContent = j.added > 0 ? t("importedCount", { n: j.added }) : t("importNone");
+    setTimeout(() => { btn.textContent = t("sshImport"); btn.disabled = false; }, 2000);
     loadRemotes();
   } catch {
-    btn.textContent = "导入失败";
-    setTimeout(() => { btn.textContent = "从 ~/.ssh/config 导入"; btn.disabled = false; }, 2000);
+    btn.textContent = t("importFailed");
+    setTimeout(() => { btn.textContent = t("sshImport"); btn.disabled = false; }, 2000);
   }
 };
 
@@ -492,9 +498,9 @@ const fmtTime = (iso) => {
 };
 
 const fmtDay = (iso) => {
-  if (!iso) return "未知日期";
+  if (!iso) return t("unknownDate");
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "未知日期";
+  if (Number.isNaN(d.getTime())) return t("unknownDate");
   const p = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
@@ -531,8 +537,8 @@ function fillFilterSelects(sources) {
   const toolSel = $("session-source");
   const toolPrev = toolSel.value;
   const tools = [...new Set(sources.map(baseTool))].sort();
-  toolSel.innerHTML = `<option value="">全部工具</option>` +
-    tools.map((t) => `<option value="${esc(t)}"${t === toolPrev ? " selected" : ""}>${esc(t)}</option>`).join("");
+  toolSel.innerHTML = `<option value="">${esc(t("allTools"))}</option>` +
+    tools.map((tool) => `<option value="${esc(tool)}"${tool === toolPrev ? " selected" : ""}>${esc(tool)}</option>`).join("");
 }
 
 /* 项目态：卡片网格 */
@@ -540,12 +546,12 @@ function renderProjectGrid(projects, totalSessions, sources) {
   $("session-count").textContent = projects.length ? `${projects.length}` : "";
   $("project-back").style.display = "none";
   $("project-crumb").style.display = "none";
-  $("session-search").placeholder = "搜索项目名…";
+  $("session-search").placeholder = t("searchProjectPh");
   if (sources) fillFilterSelects(sources);
   // 工具下拉在项目态同样可用：按工具过滤项目卡片
   const el = $("sessions");
   if (!projects.length) {
-    el.innerHTML = `<div class="remote-empty">${sessionsQuery.q ? "没有匹配的项目" : "暂无项目数据，先扫描一次"}</div>`;
+    el.innerHTML = `<div class="remote-empty">${esc(sessionsQuery.q ? t("noMatchingProjects") : t("noProjectsYet"))}</div>`;
   } else {
     el.innerHTML = `<div class="proj-grid">${projects.map((p) => {
       const name = basename(p.project);
@@ -554,7 +560,7 @@ function renderProjectGrid(projects, totalSessions, sources) {
         <div class="pname">${esc(name)}</div>
         <div class="psub" title="${esc(p.project)}">${esc(short(p.project, 40))}</div>
         <div class="pstats">
-          <span><b>${p.sessions}</b> 会话</span>
+          <span><b>${p.sessions}</b> ${esc(t("sessionsUnit", { n: p.sessions }))}</span>
           <span><b>${fmt(p.tokensIn ?? 0)}</b> tok</span>
           <span class="when">${esc(when)}</span>
         </div>
@@ -566,7 +572,7 @@ function renderProjectGrid(projects, totalSessions, sources) {
   }
   $("session-prev").disabled = true;
   $("session-next").disabled = true;
-  $("session-page-info").textContent = totalSessions ? `共 ${totalSessions} 会话 · ${projects.length} 项目` : "";
+  $("session-page-info").textContent = totalSessions ? t("pageInfoProjects", { sessions: totalSessions, projects: projects.length }) : "";
 }
 
 function enterProject(project) {
@@ -574,7 +580,7 @@ function enterProject(project) {
   sessionsQuery.q = "";
   sessionsQuery.offset = 0;
   $("session-search").value = "";
-  $("session-search").placeholder = "搜索会话 id…";
+  $("session-search").placeholder = t("searchSessionIdPh");
   $("session-source").disabled = false;
   $("project-back").style.display = "";
   $("project-crumb").style.display = "";
@@ -600,7 +606,7 @@ function renderSessions(j) {
   fillFilterSelects(j.sources ?? list.map((s) => s.source));
   const el = $("sessions");
   if (!list.length) {
-    el.innerHTML = `<div class="remote-empty">没有匹配的会话</div>`;
+    el.innerHTML = `<div class="remote-empty">${esc(t("noMatchingSessions"))}</div>`;
   } else {
     // 日期分组（同日内按时间倒序——引擎已按 started_at DESC）
     const groups = new Map();
@@ -618,7 +624,7 @@ function renderSessions(j) {
             <span class="proj">${esc(short(s.id, 38))}</span>
             <span class="sub">${fmtTime(s.startedAt)}${s.endedAt ? ` → ${fmtTime(s.endedAt)}` : ""}${s.model ? ` · ${esc(s.model)}` : ""}${machine ? ` · <span class="machine">@${esc(machine)}</span>` : ""}</span>
           </div>
-          <div class="stats">${s.rounds} 轮<b>${fmt(s.tokensIn)} tok</b></div>
+          <div class="stats">${s.rounds} ${esc(t("roundsUnit"))}<b>${fmt(s.tokensIn)} tok</b></div>
         </div>`;
       }).join("");
       return `<div class="date-head">${esc(day)}</div>${body}`;
@@ -630,7 +636,11 @@ function renderSessions(j) {
   $("session-prev").disabled = sessionsQuery.offset <= 0;
   $("session-next").disabled = sessionsQuery.offset + SESSION_PAGE >= sessionsTotal;
   $("session-page-info").textContent = sessionsTotal
-    ? `${sessionsQuery.offset + 1}–${Math.min(sessionsQuery.offset + SESSION_PAGE, sessionsTotal)} / ${sessionsTotal}`
+    ? t("pageInfoRange", {
+        a: sessionsQuery.offset + 1,
+        b: Math.min(sessionsQuery.offset + SESSION_PAGE, sessionsTotal),
+        total: sessionsTotal,
+      })
     : "";
 }
 
@@ -638,7 +648,7 @@ async function openSessionDetail(source, id) {
   openSession = { source, id };
   $("session-overlay").classList.add("show");
   $("session-detail").innerHTML =
-    `<div class="sess-head"><div class="spinner"></div><span style="color:var(--dim)">加载会话…</span></div>`;
+    `<div class="sess-head"><div class="spinner"></div><span style="color:var(--dim)">${esc(t("loadingSession"))}</span></div>`;
   await refreshSessionDetail();
 }
 
@@ -665,10 +675,10 @@ function renderSessionDetailError(err) {
   // live-refresh must not wipe an already-rendered conversation.
   if (!panel.querySelector(".spinner")) return;
   panel.innerHTML = `<div class="sess-head">
-    <span style="color:var(--red)">会话加载失败：${esc(err?.message ?? String(err))}</span>
-    <button class="mini-btn sess-close" type="button" id="session-close">关闭 ✕</button>
+    <span style="color:var(--red)">${esc(t("sessionLoadFailed", { error: err?.message ?? String(err) }))}</span>
+    <button class="mini-btn sess-close" type="button" id="session-close">${esc(t("closeBtn"))}</button>
   </div>
-  <div class="remote-empty">关闭后重试 · 若持续失败请检查引擎日志 ~/.session-forge/engine.log</div>`;
+  <div class="remote-empty">${esc(t("sessionFailHint"))}</div>`;
   $("session-close").onclick = closeSessionDetail;
 }
 
@@ -684,10 +694,10 @@ const pretty = (v) => {
 };
 
 const longPre = (text) => {
-  const t = text ?? "";
-  if (t.length <= 2000) return `<pre>${esc(t)}</pre>`;
-  return `<pre>${esc(t.slice(0, 2000))}…</pre>
-    <details class="expand"><summary>展开全部</summary><pre>${esc(t)}</pre></details>`;
+  const s = text ?? "";
+  if (s.length <= 2000) return `<pre>${esc(s)}</pre>`;
+  return `<pre>${esc(s.slice(0, 2000))}…</pre>
+    <details class="expand"><summary>${esc(t("expandAll"))}</summary><pre>${esc(s)}</pre></details>`;
 };
 
 function renderMsg(m) {
@@ -697,13 +707,13 @@ function renderMsg(m) {
   }
   if (m.role === "tool") {
     return `<div class="msg tool"><details>
-      <summary>工具 · ${esc(m.toolName ?? "tool")}${m.timestamp ? ` · ${fmtTime(m.timestamp)}` : ""}</summary>
+      <summary>${esc(t("toolPrefix"))} · ${esc(m.toolName ?? "tool")}${m.timestamp ? ` · ${fmtTime(m.timestamp)}` : ""}</summary>
       ${m.toolInput != null ? longPre(pretty(m.toolInput)) : ""}
       ${m.content ? longPre(m.content) : ""}
     </details></div>`;
   }
   const thinking = m.thinking
-    ? `<details class="thinking"><summary>思考过程</summary><pre>${esc(m.thinking)}</pre></details>`
+    ? `<details class="thinking"><summary>${esc(t("thinkingProcess"))}</summary><pre>${esc(m.thinking)}</pre></details>`
     : "";
   return `<div class="msg ${m.role === "user" ? "user" : "assistant"}">
     <div class="who">${m.role === "user" ? "USER" : `ASSISTANT${m.model ? ` · ${esc(m.model)}` : ""}`}${when}</div>
@@ -723,13 +733,13 @@ const RELAY_TARGETS = [
 function relayControlsHtml(j) {
   // All sessions are relayable: overlay (@wsl-*) and remote projections land
   // in this engine's own ~/.<tool> homes, so the local CLI can resume them.
-  const options = RELAY_TARGETS.filter((t) => t.id !== baseTool(j.source))
-    .map((t) => `<option value="${esc(t.id)}">${esc(t.label)}</option>`)
+  const options = RELAY_TARGETS.filter((target) => target.id !== baseTool(j.source))
+    .map((target) => `<option value="${esc(target.id)}">${esc(target.label)}</option>`)
     .join("");
   if (!options) return "";
-  return `<span class="relay-box" title="把本会话投影进本机的另一个 CLI，token 用完后换工具继续">
+  return `<span class="relay-box" title="${esc(t("relayTitle"))}">
     <select id="relay-target">${options}</select>
-    <button class="mini-btn" id="btn-relay" type="button">接力 →</button>
+    <button class="mini-btn" id="btn-relay" type="button">${esc(t("relayBtn"))}</button>
   </span>`;
 }
 
@@ -758,21 +768,21 @@ function renderSessionDetail(j) {
     (s) => s.source === j.source && s.id === j.id,
   );
   const stats = row
-    ? `<b>${fmt(row.tokensIn)}</b> in · <b>${fmt(row.tokensOut)}</b> out · <b>${row.rounds}</b> 轮`
-    : `<b>${(j.messages ?? []).length}</b> 条消息`;
+    ? `<b>${fmt(row.tokensIn)}</b> in · <b>${fmt(row.tokensOut)}</b> out · <b>${row.rounds}</b> ${esc(t("roundsUnit"))}`
+    : `<b>${(j.messages ?? []).length}</b> ${esc(t("messagesUnit"))}`;
   const twin = j.rawMeta?.localPath && j.rawMeta.localPath !== j.projectPath
-    ? `<div class="sub" style="width:100%;font-family:var(--mono);font-size:10.5px;color:var(--dim)" title="${esc(j.rawMeta.localPath)}">本机路径：${esc(j.rawMeta.localPath)}</div>`
+    ? `<div class="sub" style="width:100%;font-family:var(--mono);font-size:10.5px;color:var(--dim)" title="${esc(j.rawMeta.localPath)}">${esc(t("localPathLabel"))}${esc(j.rawMeta.localPath)}</div>`
     : "";
   const head = `<div class="sess-head">
     <span class="chip">${esc(j.source)}</span>
     <span class="proj" title="${esc(j.projectPath || j.id)}">${esc(short(j.projectPath || j.id, 56))}</span>
     <span class="stats">${fmtTime(j.startedAt)}${j.endedAt ? ` → ${fmtTime(j.endedAt)}` : ""} · ${stats}</span>
     ${relayControlsHtml(j)}
-    <button class="mini-btn sess-close" type="button" id="session-close">关闭 ✕</button>
+    <button class="mini-btn sess-close" type="button" id="session-close">${esc(t("closeBtn"))}</button>
     ${twin}
   </div>`;
   const relay = openSession?.relayResult ?? "";
-  const body = (j.messages ?? []).map(renderMsg).join("") || `<div class="remote-empty">此会话没有消息</div>`;
+  const body = (j.messages ?? []).map(renderMsg).join("") || `<div class="remote-empty">${esc(t("noMessages"))}</div>`;
   const st = panel.scrollTop;
   panel.innerHTML = `${head}<div class="relay-result" id="relay-result">${relay}</div>${body}`;
   [...panel.querySelectorAll("details")].forEach((d, i) => {
@@ -798,7 +808,7 @@ async function runRelay(j) {
   const btn = $("btn-relay");
   if (btn) btn.disabled = true;
   box.className = "relay-result show";
-  box.textContent = "正在接力…";
+  box.textContent = t("relayWorking");
   // The 15s live refresh re-renders the detail panel and can detach our
   // cached nodes mid-request — always re-acquire by id when finishing.
   const finish = (html, failed) => {
@@ -823,12 +833,12 @@ async function runRelay(j) {
     const r = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(r.error ?? `HTTP ${res.status}`);
     finish(
-      `✓ 已接力到 <b>${esc(to)}</b>${r.machine && r.machine !== "local" ? ` · ${esc(r.machine)}` : ""} · ${r.messagesConverted} 条消息<br>` +
-        `<span class="relay-cmd">继续工作：${esc(r.resumeHint ?? "")}</span>`,
+      `${esc(t("relayDone"))} <b>${esc(to)}</b>${r.machine && r.machine !== "local" ? ` · ${esc(r.machine)}` : ""} · ${esc(t("relayDoneMessages", { n: r.messagesConverted }))}<br>` +
+        `<span class="relay-cmd">${esc(t("relayResumeHint"))}${esc(r.resumeHint ?? "")}</span>`,
       false,
     );
   } catch (e) {
-    finish(`接力失败：${esc(e?.message ?? String(e))}`, true);
+    finish(esc(t("relayFailed", { error: e?.message ?? String(e) })), true);
   }
 }
 

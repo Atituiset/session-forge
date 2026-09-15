@@ -4,6 +4,7 @@ import { Command } from "commander";
 // Imported (not runtime-read) so the version is inlined by `bun build --compile`.
 import pkg from "../package.json";
 import panelJs from "../src-web/app.js" with { type: "text" };
+import panelI18nJs from "../src-web/i18n.js" with { type: "text" };
 // Panel assets are embedded into the compiled binary so `serve` is
 // self-contained: open http://127.0.0.1:<port>/ and the panel is right there.
 import panelHtml from "../src-web/index.html" with { type: "text" };
@@ -783,6 +784,11 @@ program
       }
       if (url.pathname === "/app.js") {
         return new Response(panelJs, {
+          headers: { "content-type": "text/javascript; charset=utf-8" },
+        });
+      }
+      if (url.pathname === "/i18n.js") {
+        return new Response(panelI18nJs, {
           headers: { "content-type": "text/javascript; charset=utf-8" },
         });
       }

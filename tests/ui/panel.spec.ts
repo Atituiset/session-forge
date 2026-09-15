@@ -128,6 +128,8 @@ test.describe("panel boot", () => {
     await expect(page.locator("#engine-pill-text")).toContainText("ENGINE ONLINE");
     // scan button enabled when engine is up
     await expect(page.locator("#btn-scan")).toBeEnabled();
+    // default locale is English — the toggle offers the switch to Chinese
+    await expect(page.locator("#lang-toggle")).toHaveText("中");
   });
 });
 
@@ -139,7 +141,7 @@ test.describe("scan button", () => {
     // toast appears while running
     await expect(page.locator("#toast.show")).toBeVisible();
     // eventually completes with the new-format summary (duration + sources)
-    await expect(page.locator("#toast-msg")).toContainText(/扫描完成|扫描失败/, {
+    await expect(page.locator("#toast-msg")).toContainText(/Scan complete|Scan failed/, {
       timeout: 90_000,
     });
     // button re-enabled afterwards
@@ -150,7 +152,7 @@ test.describe("scan button", () => {
     test.setTimeout(120_000);
     await page.goto(PANEL);
     await page.click("#btn-scan");
-    await expect(page.locator("#toast-msg")).toContainText(/扫描完成/, { timeout: 90_000 });
+    await expect(page.locator("#toast-msg")).toContainText(/Scan complete/, { timeout: 90_000 });
     await page.reload();
     await page.waitForTimeout(1500);
     const sessions = await page.locator(".metric .value").first().textContent();
@@ -170,7 +172,7 @@ test.describe("remote machines", () => {
     await page.click("#btn-remote-add");
     const row = page.locator(".remote-row", { hasText: "ci-runner@e2e-host.example.com" });
     await expect(row).toBeVisible();
-    await expect(row).toContainText("已存密码凭证"); // credential state surfaced
+    await expect(row).toContainText("password credential stored"); // credential state surfaced
     expect(await page.inputValue("#remote-pass")).toBe(""); // cleared after submit
   });
 
@@ -204,7 +206,7 @@ test.describe("remote machines", () => {
       await page.click("#btn-remote-add");
     }
     await expect(page.locator(".remote-row")).toHaveCount(before + 2);
-    await expect(page.locator("#remote-count")).toHaveText(`${before + 2} 台`);
+    await expect(page.locator("#remote-count")).toHaveText(`${before + 2} machines`);
   });
 
   test("delete removes the machine", async ({ page }) => {
@@ -259,7 +261,7 @@ test.describe("remote machines", () => {
     await page.reload();
     await page.waitForTimeout(1500);
     await expect(page.locator(".remote-row", { hasText: "unreachable.invalid" })).toContainText(
-      /失败|待扫描/,
+      /Failed|Waiting/,
     );
     const resp = await fetch(`${API}/api/health`);
     expect((await resp.json()).ok).toBe(true);
@@ -366,9 +368,9 @@ test.describe("machine scope", () => {
   }) => {
     await page.goto(PANEL);
     const cards = page.locator(".machine-card");
-    await expect(cards).toHaveCount(2); // 全部机器 + 本机（fixtures 无远程数据）
-    await expect(cards.nth(0)).toContainText("全部机器");
-    await expect(cards.nth(1)).toContainText("本机");
+    await expect(cards).toHaveCount(2); // All machines + local (fixtures 无远程数据)
+    await expect(cards.nth(0)).toContainText("All machines");
+    await expect(cards.nth(1)).toContainText("Local");
     // Tool chips come from the sources observed on that machine.
     await expect(cards.nth(1).locator(".chip", { hasText: "claude-code" })).toBeVisible();
     await page.waitForTimeout(1200);
@@ -378,9 +380,9 @@ test.describe("machine scope", () => {
     await expect(cards.nth(0)).not.toHaveClass(/active/);
     await page.waitForTimeout(800);
     const after = (await page.locator(".metric .value").first().textContent()) ?? "";
-    // Fixtures are all-local: scoping to "本机" keeps the same totals.
+    // Fixtures are all-local: scoping to "Local" keeps the same totals.
     expect(after).toBe(before);
-    await expect(page.locator("#foot")).toContainText("本机");
+    await expect(page.locator("#foot")).toContainText("Local");
     // Switching back restores the aggregate card as active.
     await cards.nth(0).click();
     await expect(cards.nth(0)).toHaveClass(/active/);
@@ -431,7 +433,8 @@ test.describe("project-first session browser", () => {
     await page.goto(PANEL);
     expect(await page.locator(".proj-card").count()).toBeGreaterThanOrEqual(2); // alpha + beta
     const card = page.locator(".proj-card", { hasText: "proj-alpha" }).first();
-    await expect(card).toContainText("会话");
+    // Singular/plural-agnostic: the fixture card renders "1 session".
+    await expect(card).toContainText("session");
     await card.click();
     // breadcrumb + back button appear; sessions are grouped under date heads
     await expect(page.locator("#project-crumb")).toHaveText("proj-alpha");
@@ -453,7 +456,7 @@ test.describe("project-first session browser", () => {
     await page.fill("#session-search", "zzz-no-such-project");
     await page.waitForTimeout(600);
     await expect(page.locator(".proj-card")).toHaveCount(0);
-    await expect(page.locator("#sessions")).toContainText("没有匹配的项目");
+    await expect(page.locator("#sessions")).toContainText("No matching projects");
   });
 
   test("inside a project, session-id search narrows the list", async ({ page }) => {
@@ -495,7 +498,7 @@ test.describe("relay (projection to another CLI)", () => {
     await page.selectOption("#relay-target", "codex");
     await btn.click();
     const result = page.locator("#relay-result");
-    await expect(result).toContainText("已接力到", { timeout: 10_000 });
+    await expect(result).toContainText("Relayed to", { timeout: 10_000 });
     await expect(result).toContainText("codex resume");
     // The rollout file actually landed in the sandboxed relay home.
     const root = path.join(dbDir, "relay-home", ".codex", "sessions");
@@ -523,9 +526,35 @@ test.describe("relay (projection to another CLI)", () => {
     // the "already relayed" overwrite guard regardless of execution order.
     await page.selectOption("#relay-target", "kimi-code");
     await page.click("#btn-relay");
-    await expect(page.locator("#relay-result")).toContainText("已接力到", { timeout: 10_000 });
+    await expect(page.locator("#relay-result")).toContainText("Relayed to", { timeout: 10_000 });
     // Force a live refresh of the open detail view.
     await page.waitForTimeout(16_000);
-    await expect(page.locator("#relay-result")).toContainText("已接力到");
+    await expect(page.locator("#relay-result")).toContainText("Relayed to");
+  });
+});
+
+test.describe("i18n", () => {
+  test.beforeAll(ensureScanned);
+
+  test("localStorage sf.lang=zh-CN renders the panel in Chinese", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    await page.addInitScript(() => localStorage.setItem("sf.lang", "zh-CN"));
+    await page.goto(PANEL);
+    // the toggle offers the switch back to English
+    await expect(page.locator("#lang-toggle")).toHaveText("EN");
+    // static placeholder + dynamically rebuilt project grid copy
+    await expect(page.locator("#session-search")).toHaveAttribute("placeholder", "搜索项目名…", {
+      timeout: 15_000,
+    });
+    const card = page.locator(".proj-card", { hasText: "proj-alpha" }).first();
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    await expect(card).toContainText("会话");
+    await card.click();
+    const row = page.locator(".session-row").first();
+    await expect(row).toBeVisible({ timeout: 10_000 });
+    await row.click();
+    await expect(page.locator("#btn-relay")).toHaveText("接力 →", { timeout: 10_000 });
+    expect(errors).toEqual([]);
   });
 });
