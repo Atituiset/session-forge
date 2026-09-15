@@ -2,11 +2,19 @@ const $ = (id) => document.getElementById(id);
 const fmt = (n) => n >= 1e9 ? `${(n / 1e9).toFixed(2)}G` : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const short = (s, n = 28) => s.length > n ? `…${s.slice(-n + 1)}` : s;
-// Engine source: ?api= wins, then the last picked engine, then the bundled
-// sidecar default. Picked engines persist so the desktop app reopens on them.
+// Engine source: ?api= wins, then the last picked engine, then — when the
+// panel itself is served over plain http on localhost (the engine embeds and
+// serves these assets) — the same origin. Finally the bundled sidecar default.
+// Picked engines persist so the desktop app reopens on them.
+const sameOriginEngine =
+  (location.protocol === "http:" || location.protocol === "https:") &&
+  /^(127\.0\.0\.1|localhost|\[::1\])$/.test(location.hostname)
+    ? location.origin
+    : null;
 const API =
   new URLSearchParams(location.search).get("api") ??
   localStorage.getItem("sf.engine.api") ??
+  sameOriginEngine ??
   "http://127.0.0.1:4177";
 // NOTE: Tauri injects a non-configurable `window.isTauri` global — a
 // top-level `const isTauri` here would be a SyntaxError ("already declared")

@@ -1,7 +1,28 @@
 {
   "name": "session-forge",
   "version": "0.1.27",
-  "description": "Aggregate AI coding agent sessions into searchable, reusable knowledge assets",
+  "description": "The session hub for AI coding agents — every CLI, every machine, one searchable memory. Relay sessions between agents mid-task.",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "ai-agents",
+    "llm",
+    "coding-assistant",
+    "session-management",
+    "knowledge-management",
+    "developer-tools",
+    "wsl",
+    "ssh",
+    "cli",
+    "tauri"
+  ],
+  "license": "MIT",
+  "author": "Atituiset",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Atituiset/session-forge.git"
+  },
+  "homepage": "https://github.com/Atituiset/session-forge",
   "type": "module",
   "bin": {
     "session-forge": "./src/cli.ts"

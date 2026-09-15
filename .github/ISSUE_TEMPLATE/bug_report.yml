@@ -1,0 +1,35 @@
+name: Bug report
+description: Something isn't working — a session won't scan, the panel misbehaves, a relay fails
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what did you get?
+    validations:
+      required: true
+  - type: textarea
+    id: session-file
+    attributes:
+      label: Session file (if parsing-related)
+      description: >
+        If a session fails to scan or renders wrong, attach the raw session file
+        (or a redacted slice). These files may contain secrets — redact before
+        attaching.
+      placeholder: e.g. ~/.codex/sessions/2026/09/16/rollout-….jsonl (first 50 lines)
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: OS, SessionForge version (`session-forge --version`), agent CLI + version
+      placeholder: Windows 11 + WSL2 · v0.1.27 · codex 0.154.0
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Engine log tail (~/.session-forge/engine.log) or CLI output
+      render: text

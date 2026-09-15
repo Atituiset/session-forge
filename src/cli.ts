@@ -3,6 +3,10 @@ import path from "node:path";
 import { Command } from "commander";
 // Imported (not runtime-read) so the version is inlined by `bun build --compile`.
 import pkg from "../package.json";
+import panelJs from "../src-web/app.js" with { type: "text" };
+// Panel assets are embedded into the compiled binary so `serve` is
+// self-contained: open http://127.0.0.1:<port>/ and the panel is right there.
+import panelHtml from "../src-web/index.html" with { type: "text" };
 import {
   aggregateByProject,
   aggregateByTime,
@@ -768,6 +772,19 @@ program
       }
       if (url.pathname === "/api/health") {
         return Response.json({ ok: true, scanning: localJob?.status === "running" });
+      }
+      // Embedded panel: `serve` doubles as the panel host so CLI users get the
+      // full UI without the desktop app. Same-origin, so the panel's API base
+      // defaults to this server (see app.js).
+      if (url.pathname === "/" || url.pathname === "/index.html") {
+        return new Response(panelHtml as unknown as string, {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        });
+      }
+      if (url.pathname === "/app.js") {
+        return new Response(panelJs, {
+          headers: { "content-type": "text/javascript; charset=utf-8" },
+        });
       }
       return new Response("not found", { status: 404 });
     };

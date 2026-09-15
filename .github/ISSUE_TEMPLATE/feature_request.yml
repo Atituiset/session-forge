@@ -1,0 +1,25 @@
+name: Feature request
+description: An idea — a new agent to support, a workflow improvement, a UI wish
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the workflow or pain point, not just the feature.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How should it work? Sketches welcome.
+  - type: checkboxes
+    id: agent-support
+    attributes:
+      label: Is this a request to support a new agent CLI?
+      options:
+        - label: >
+            Yes — I checked that its session storage format is not a variant of an
+            already-supported family (Codex-style JSONL / Claude transcript / opencode SQLite)
