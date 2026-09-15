@@ -20,7 +20,7 @@ import { renderKnowledgeBase } from "./output/markdown.ts";
 import { bar, renderTable } from "./output/terminal.ts";
 import { readerFor } from "./readers/index.ts";
 import type { ReaderFamily } from "./registry.ts";
-import { RELAY_TARGETS, relaySession } from "./relay.ts";
+import { RELAY_TARGETS, relaySessionToMachine } from "./relay.ts";
 import { filterNewHosts, parseSshConfigHosts, sshConfigPath } from "./ssh_config.ts";
 import type { SessionSummary } from "./store.ts";
 import { defaultStorePath, Store } from "./store.ts";
@@ -360,11 +360,17 @@ program
           process.exitCode = 1;
           return;
         }
-        // Overlay sources (@wsl-*/@windows-host) relay fine — the projection
-        // lands in THIS machine's tool homes.
-        const result = relaySession(session, opts.to, {
+        // 机器感知：投影装到源会话所在的机器（本机 / WSL / Windows 主机 /
+        // SSH 远程）。CLI 场景没有会话级密码缓存，ssh 远程走 key 认证。
+        const transport = new LocalTransport();
+        const result = await relaySessionToMachine(session, opts.to, {
           force: opts.force,
           withNote: opts.note,
+          localTransport: transport,
+          sshTransportFor: (label) => {
+            const r = loadRemotes().find((x) => (x.label?.trim() || x.name) === label);
+            return r ? new SshTransport(r.name, label) : null;
+          },
         });
         for (const f of result.files) {
           console.log(`installed ${f}`);
@@ -589,11 +595,25 @@ program
         const session = store.getSession(body.source, body.id);
         if (!session) return Response.json({ error: "session not found" }, { status: 404 });
         try {
-          // Relaying overlay/remote sources is fine: the projection is
-          // installed into THIS machine's ~/.<tool> directories so the local
-          // CLI can resume it. (Rejected in 0.1.18 — that guard hid the
-          // feature for wsl-*/windows-host sessions, the main browsing path.)
-          const result = relaySession(session, body.to, { force: body.force === true });
+          // 机器感知接力：投影装到源会话所在的机器（本机 / wsl-<distro> /
+          // windows-host / ssh 远程），resume 命令在该机器上直接可用。
+          const result = await relaySessionToMachine(session, body.to, {
+            force: body.force === true,
+            localTransport: transport,
+            sshTransportFor: (label) => {
+              const remote = loadRemotes().find((x) => (x.label?.trim() || x.name) === label);
+              if (!remote) return null;
+              const pw = remotePasswords.get(remote.name);
+              return pw
+                ? new SshLibTransport({
+                    host: remote.host,
+                    username: remote.username,
+                    password: pw,
+                    label,
+                  })
+                : new SshTransport(remote.name, label);
+            },
+          });
           return Response.json({ ok: true, ...result });
         } catch (err) {
           return Response.json(

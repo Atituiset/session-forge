@@ -815,7 +815,7 @@ async function runRelay(j) {
     const r = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(r.error ?? `HTTP ${res.status}`);
     finish(
-      `✓ 已接力到 <b>${esc(to)}</b> · ${r.messagesConverted} 条消息<br>` +
+      `✓ 已接力到 <b>${esc(to)}</b>${r.machine && r.machine !== "local" ? ` · ${esc(r.machine)}` : ""} · ${r.messagesConverted} 条消息<br>` +
         `<span class="relay-cmd">继续工作：${esc(r.resumeHint ?? "")}</span>`,
       false,
     );

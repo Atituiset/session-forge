@@ -12,8 +12,14 @@ export function toClaudeCode(session: NirSession): ConvertReport {
   let parentUuid: string | null = null;
   const uuids = new Map<number, string>();
 
-  const slug = session.projectPath
-    ? `-${session.projectPath.replace(/^\//, "").replace(/\//g, "-")}`
+  // Claude Code's project dir slug: Linux paths keep their leading dash
+  // ("/home/u/x" → "-home-u-x"); Windows drive paths lose it and turn both
+  // the colon and slashes into dashes ("C:\Users\x" → "C--Users-x").
+  const pp = session.projectPath;
+  const slug = pp
+    ? /^[A-Za-z]:[\\/]/.test(pp)
+      ? pp.replace(/[:\\/]/g, "-")
+      : `-${pp.replace(/^\//, "").replace(/\//g, "-")}`
     : "-tmp-session-forge";
 
   const mkRow = (uuid: string, row: Record<string, unknown>): string =>

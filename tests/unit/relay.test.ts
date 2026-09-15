@@ -1,9 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { NirSession } from "../../src/nir/schema.ts";
-import { relaySession } from "../../src/relay.ts";
+import {
+  type RelaySink,
+  relayMachineOfSource,
+  relaySession,
+  relaySessionToMachine,
+  sshRelaySink,
+  windowsHostRelaySink,
+  windowsProfileToMntDir,
+  wslRelaySink,
+} from "../../src/relay.ts";
+import type { Transport } from "../../src/transport/types.ts";
 
 function makeHome(): string {
   return mkdtempSync(path.join(tmpdir(), "sf-relay-"));
@@ -143,5 +153,168 @@ describe("relaySession", () => {
     expect(() =>
       relaySession(makeSession({ source: "codex" }), "codex", { homeDir: home }),
     ).toThrow(/无需接力/);
+  });
+});
+
+describe("relayMachineOfSource", () => {
+  test("parses local, wsl, windows-host and ssh machine tags", () => {
+    expect(relayMachineOfSource("codex")).toEqual({ kind: "local" });
+    expect(relayMachineOfSource("codex@wsl-Ubuntu")).toEqual({ kind: "wsl", distro: "Ubuntu" });
+    expect(relayMachineOfSource("claude-code@windows-host")).toEqual({ kind: "windows-host" });
+    expect(relayMachineOfSource("opencode@lan-ubuntu")).toEqual({
+      kind: "ssh",
+      label: "lan-ubuntu",
+    });
+    // ssh labels may themselves contain @ (user@host) — split on the first @ only.
+    expect(relayMachineOfSource("codex@ops@10.0.0.1")).toEqual({
+      kind: "ssh",
+      label: "ops@10.0.0.1",
+    });
+  });
+});
+
+describe("relaySessionToMachine", () => {
+  const dummyTransport = {} as unknown as Transport;
+
+  function fakeSink(existing = false): RelaySink & { written: [string, string][] } {
+    const written: [string, string][] = [];
+    return {
+      written,
+      exists: async () => existing,
+      write: async (rel, content) => {
+        written.push([rel, content]);
+        return `fake:~/${rel}`;
+      },
+    };
+  }
+
+  test("wsl source: files go to the machine sink; hint is machine-prefixed", async () => {
+    const sink = fakeSink();
+    const result = await relaySessionToMachine(
+      makeSession({ source: "codex@wsl-Ubuntu" }),
+      "claude-code",
+      {
+        withNote: false,
+        localTransport: dummyTransport,
+        sinkFor: () => sink,
+      },
+    );
+    expect(result.machine).toBe("wsl-Ubuntu");
+    expect(sink.written).toHaveLength(1);
+    const [rel] = sink.written[0] ?? ["", ""];
+    expect(rel).toBe(`.claude/projects/-home-ci-proj-alpha/${result.sessionId}.jsonl`);
+    expect(result.resumeHint).toBe(
+      `（在 wsl-Ubuntu 上）cd <项目目录> && claude --resume ${result.sessionId}`,
+    );
+  });
+
+  test("same tool on a DIFFERENT machine is a legal relay; local same-tool still refused", async () => {
+    const sink = fakeSink();
+    const result = await relaySessionToMachine(
+      makeSession({ source: "codex@wsl-Ubuntu" }),
+      "codex",
+      {
+        withNote: false,
+        localTransport: dummyTransport,
+        sinkFor: () => sink,
+      },
+    );
+    expect(result.machine).toBe("wsl-Ubuntu");
+    expect(sink.written).toHaveLength(1);
+    await expect(
+      relaySessionToMachine(makeSession({ source: "codex" }), "codex", {
+        localTransport: dummyTransport,
+        sinkFor: () => fakeSink(),
+      }),
+    ).rejects.toThrow(/无需接力/);
+  });
+
+  test("existing destination refuses without force; force overwrites", async () => {
+    await expect(
+      relaySessionToMachine(makeSession({ source: "codex@wsl-Ubuntu" }), "claude-code", {
+        localTransport: dummyTransport,
+        sinkFor: () => fakeSink(true),
+      }),
+    ).rejects.toThrow(/目标文件已存在/);
+    const sink = fakeSink(true);
+    await relaySessionToMachine(makeSession({ source: "codex@wsl-Ubuntu" }), "claude-code", {
+      force: true,
+      localTransport: dummyTransport,
+      sinkFor: () => sink,
+    });
+    expect(sink.written).toHaveLength(1);
+  });
+
+  test("unknown ssh machine: clear error pointing at remotes", async () => {
+    await expect(
+      relaySessionToMachine(makeSession({ source: "opencode@ghost" }), "codex", {
+        localTransport: dummyTransport,
+        sshTransportFor: () => null,
+      }),
+    ).rejects.toThrow(/ghost.*remotes/);
+  });
+});
+
+describe("relay sinks", () => {
+  test("wslRelaySink resolves guest $HOME via wsl.exe and writes under the UNC root", async () => {
+    const uncRoot = makeHome();
+    const execCalls: string[][] = [];
+    const transport = {
+      exec: async (argv: string[]) => {
+        execCalls.push(argv);
+        return { exitCode: 0, stdout: "/home/u\n", stderr: "" };
+      },
+    } as unknown as Transport;
+    const sink = wslRelaySink("Ubuntu", transport, { uncRoot });
+    expect(await sink.exists(".claude/x.jsonl")).toBe(false);
+    const dest = await sink.write(".claude/x.jsonl", "abc");
+    expect(dest).toBe(path.join(uncRoot, "Ubuntu", "home", "u", ".claude", "x.jsonl"));
+    expect(readFileSync(dest, "utf8")).toBe("abc");
+    expect(await sink.exists(".claude/x.jsonl")).toBe(true);
+    expect(execCalls[0]).toEqual(["wsl.exe", "-d", "Ubuntu", "--", "printenv", "HOME"]);
+  });
+
+  test("windowsProfileToMntDir maps drive paths to drvfs mounts", () => {
+    expect(windowsProfileToMntDir("C:\\Users\\Tester")).toBe("/mnt/c/Users/Tester");
+    expect(windowsProfileToMntDir("D:/u/me")).toBe("/mnt/d/u/me");
+    expect(windowsProfileToMntDir("/home/u")).toBeNull();
+  });
+
+  test("windowsHostRelaySink writes under the resolved profile dir", async () => {
+    const profile = makeHome();
+    const sink = windowsHostRelaySink({} as unknown as Transport, { profileDir: profile });
+    const dest = await sink.write(".claude/projects/-p/1.jsonl", "xyz");
+    expect(dest).toBe(path.join(profile, ".claude", "projects", "-p", "1.jsonl"));
+    expect(readFileSync(dest, "utf8")).toBe("xyz");
+  });
+
+  test("sshRelaySink stages content, deploys, then mkdir+mv guest-side", async () => {
+    const tmpRoot = makeHome();
+    const execCmds: string[][] = [];
+    const deployed: [string, string][] = [];
+    const transport = {
+      label: "ssh:lan-ubuntu",
+      exec: async (argv: string[]) => {
+        execCmds.push(argv);
+        return { exitCode: 0, stdout: "", stderr: "" };
+      },
+      deployFile: async (local: string, remoteRel: string) => {
+        deployed.push([local, remoteRel]);
+      },
+    } as unknown as Transport;
+    const sink = sshRelaySink(transport, { tmpDir: tmpRoot });
+    expect(await sink.exists(".claude/x.jsonl")).toBe(true);
+    expect(execCmds[0]?.join(" ")).toContain("test -e");
+    const dest = await sink.write(".claude/projects/-p/1.jsonl", "data");
+    expect(dest).toBe("lan-ubuntu:~/.claude/projects/-p/1.jsonl");
+    expect(deployed).toHaveLength(1);
+    const [stageFile, stageName] = deployed[0] ?? ["", ""];
+    expect(stageName).toBe(".session-forge-relay-stage");
+    // Staging file is cleaned up after the push.
+    expect(existsSync(stageFile)).toBe(false);
+    const mv = execCmds[1]?.join(" ") ?? "";
+    expect(mv).toContain("mkdir -p");
+    expect(mv).toContain(".claude/projects/-p");
+    expect(mv).toContain("mv");
   });
 });
