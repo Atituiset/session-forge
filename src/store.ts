@@ -20,10 +20,12 @@ export class Store {
   private getRevStmt: ReturnType<Database["prepare"]>;
 
   // Bump whenever readers start extracting MORE from the same files
-  // (2 = thinking/reasoning capture). On upgrade the stored revs are
-  // reset so every session file is re-ingested once — rows are updated
-  // in place via upsert, so tags and other row data survive.
-  private static readonly INGEST_FORMAT_VERSION = 2;
+  // (2 = thinking/reasoning capture, 3 = agent-session-format NIR:
+  // toolCallId pairing, agent lanes, session-level title/model/cost/tokens).
+  // On upgrade the stored revs are reset so every session file is
+  // re-ingested once — rows are updated in place via upsert, so tags and
+  // other row data survive.
+  private static readonly INGEST_FORMAT_VERSION = 3;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;

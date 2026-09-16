@@ -9,8 +9,11 @@ function msg(partial: Partial<NirMessage> & { role: NirMessage["role"] }): NirMe
     timestamp: "2026-05-01T10:00:00.000Z",
     toolName: null,
     toolInput: null,
+    toolCallId: null,
     model: null,
     thinking: null,
+    agent: null,
+    agentLabel: null,
     ...partial,
   };
 }
@@ -19,6 +22,9 @@ const session: NirSession = {
   id: "think-1",
   source: "test",
   sourceVersion: null,
+  title: null,
+  model: null,
+  cost: null,
   projectPath: "/home/u/proj",
   startedAt: "2026-05-01T10:00:00.000Z",
   endedAt: null,

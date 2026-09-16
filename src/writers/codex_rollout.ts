@@ -38,6 +38,10 @@ export function toCodexRollout(session: NirSession): ConvertReport {
   );
 
   let callCounter = 0;
+  // Tool-call pairing: NIR `toolCallId` → the call_id we emitted, so a tool
+  // result links to its call even when messages sit between them.
+  const callIds = new Map<string, string>();
+  let lastCallId: string | null = null;
   for (const m of session.messages) {
     const when = m.timestamp ?? ts(start);
     if (m.role === "assistant" && m.thinking) {
@@ -92,6 +96,9 @@ export function toCodexRollout(session: NirSession): ConvertReport {
       }
       toolsMapped++;
       converted++;
+      const callId = `call_forge_${callCounter}`;
+      if (m.toolCallId) callIds.set(m.toolCallId, callId);
+      lastCallId = callId;
       lines.push(
         JSON.stringify({
           timestamp: when,
@@ -100,19 +107,23 @@ export function toCodexRollout(session: NirSession): ConvertReport {
             type: "function_call",
             name: toCodexTool(canonical),
             arguments: JSON.stringify(args),
-            call_id: `call_forge_${callCounter}`,
+            call_id: callId,
           },
         }),
       );
     } else if (m.role === "tool") {
       converted++;
+      const callId =
+        (m.toolCallId ? callIds.get(m.toolCallId) : undefined) ??
+        lastCallId ??
+        `call_forge_${callCounter}`;
       lines.push(
         JSON.stringify({
           timestamp: when,
           type: "response_item",
           payload: {
             type: "function_call_output",
-            call_id: `call_forge_${callCounter}`,
+            call_id: callId,
             output: m.content.slice(0, 10_000),
           },
         }),

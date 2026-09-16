@@ -124,8 +124,11 @@ function projectSession(session: NirSession, targetId: string, opts: RelayOption
           timestamp: new Date().toISOString(),
           toolName: null,
           toolInput: null,
+          toolCallId: null,
           model: null,
           thinking: null,
+          agent: null,
+          agentLabel: null,
         },
       ],
     };

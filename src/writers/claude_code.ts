@@ -35,6 +35,10 @@ export function toClaudeCode(session: NirSession): ConvertReport {
     });
 
   let counter = 0;
+  // Tool-call pairing: NIR `toolCallId` → the tool_use id we emitted, so a
+  // tool result links to its call even when messages sit between them.
+  const toolUseIds = new Map<string, string>();
+  let lastToolUseId: string | null = null;
   for (const m of session.messages) {
     counter++;
     const when = m.timestamp ?? start.toISOString();
@@ -108,6 +112,8 @@ export function toClaudeCode(session: NirSession): ConvertReport {
         }),
       );
       parentUuid = uuid;
+      if (m.toolCallId) toolUseIds.set(m.toolCallId, toolUseId);
+      lastToolUseId = toolUseId;
       uuids.set(counter, toolUseId);
     } else if (m.role === "assistant" && m.thinking) {
       converted++;
@@ -125,7 +131,10 @@ export function toClaudeCode(session: NirSession): ConvertReport {
       parentUuid = uuid;
     } else if (m.role === "tool") {
       converted++;
-      const toolUseId = `forge-tu-${counter - 1}`;
+      const toolUseId =
+        (m.toolCallId ? toolUseIds.get(m.toolCallId) : undefined) ??
+        lastToolUseId ??
+        `forge-tu-${counter - 1}`;
       const uuid = `forge-tr-${counter}`;
       lines.push(
         mkRow(uuid, {
