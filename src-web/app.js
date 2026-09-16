@@ -700,14 +700,16 @@ const longPre = (text) => {
     <details class="expand"><summary>${esc(t("expandAll"))}</summary><pre>${esc(s)}</pre></details>`;
 };
 
-function renderMsg(m) {
+function renderMsg(m, toolNames) {
   const when = m.timestamp ? `<time>${fmtTime(m.timestamp)}</time>` : "";
   if (m.role === "system") {
     return `<div class="msg system">${esc(short(m.content ?? "", 300))}</div>`;
   }
   if (m.role === "tool") {
+    // Tool results carry no toolName — pair back to the call via toolCallId.
+    const name = m.toolName ?? (m.toolCallId && toolNames?.get(m.toolCallId)) ?? "tool";
     return `<div class="msg tool"><details>
-      <summary>${esc(t("toolPrefix"))} · ${esc(m.toolName ?? "tool")}${m.timestamp ? ` · ${fmtTime(m.timestamp)}` : ""}</summary>
+      <summary>${esc(t("toolPrefix"))} · ${esc(name)}${m.timestamp ? ` · ${fmtTime(m.timestamp)}` : ""}</summary>
       ${m.toolInput != null ? longPre(pretty(m.toolInput)) : ""}
       ${m.content ? longPre(m.content) : ""}
     </details></div>`;
@@ -782,7 +784,12 @@ function renderSessionDetail(j) {
     ${twin}
   </div>`;
   const relay = openSession?.relayResult ?? "";
-  const body = (j.messages ?? []).map(renderMsg).join("") || `<div class="remote-empty">${esc(t("noMessages"))}</div>`;
+  const msgs = j.messages ?? [];
+  const toolNames = new Map();
+  for (const m of msgs) {
+    if (m.role === "assistant" && m.toolName && m.toolCallId) toolNames.set(m.toolCallId, m.toolName);
+  }
+  const body = msgs.map((m) => renderMsg(m, toolNames)).join("") || `<div class="remote-empty">${esc(t("noMessages"))}</div>`;
   const st = panel.scrollTop;
   panel.innerHTML = `${head}<div class="relay-result" id="relay-result">${relay}</div>${body}`;
   [...panel.querySelectorAll("details")].forEach((d, i) => {

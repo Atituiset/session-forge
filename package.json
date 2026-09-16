@@ -38,6 +38,7 @@
     "desktop:build": "tauri build"
   },
   "dependencies": {
+    "agent-session-format": "github:Atituiset/agent-session-format#v0.1.0",
     "commander": "^15.0.0",
     "ssh2": "^1.17.0",
     "zod": "^4.4.3"

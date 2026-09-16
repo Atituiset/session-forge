@@ -1,31 +1,39 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type { NirSession } from "../../src/nir/schema.ts";
 import { ClaudeCodeReader } from "../../src/readers/claude_code.ts";
 import { CodexFamilyReader } from "../../src/readers/codex_family.ts";
 import type { ScanEvent } from "../../src/readers/util.ts";
 import { LocalTransport } from "../../src/transport/local.ts";
 
+// These tests pin the ADAPTER contract (file I/O → package parser → ScanEvent):
+// source stamping, filename dispatch, rev computation, issue reporting, and
+// toolCallId pairing. Transcript-parsing details are covered by the
+// agent-session-format package's own test suite.
+
 async function collect(gen: AsyncGenerator<ScanEvent>): Promise<{
-  sessions: NirSession[];
-  issues: ScanEvent[];
+  sessions: Extract<ScanEvent, { kind: "session" }>[];
+  issues: Extract<ScanEvent, { kind: "issue" }>[];
 }> {
-  const sessions: NirSession[] = [];
-  const issues: ScanEvent[] = [];
+  const sessions: Extract<ScanEvent, { kind: "session" }>[] = [];
+  const issues: Extract<ScanEvent, { kind: "issue" }>[] = [];
   for await (const e of gen) {
-    if (e.kind === "session") sessions.push(e.session);
+    if (e.kind === "session") sessions.push(e);
     else issues.push(e);
   }
   return { sessions, issues };
 }
 
-function first(sessions: NirSession[]): NirSession {
+function first(sessions: Extract<ScanEvent, { kind: "session" }>[]): NirSession {
   const s = sessions[0];
   if (!s) throw new Error("expected at least one session");
-  return s;
+  return s.session;
 }
 
-describe("codex-family reader", () => {
-  test("parses codex rollout", async () => {
+describe("codex-family adapter", () => {
+  test("dispatches rollout .jsonl and stamps source/rev/sourceFile", async () => {
     const r = new CodexFamilyReader();
     const { sessions, issues } = await collect(
       r.scan(new LocalTransport(), {
@@ -35,108 +43,97 @@ describe("codex-family reader", () => {
     );
     expect(issues).toHaveLength(0);
     expect(sessions).toHaveLength(1);
-    const s = first(sessions);
+    const ev = sessions[0];
+    if (!ev) throw new Error("expected a session event");
+    expect(ev.sourceFile).toBe("tests/fixtures/codex/rollout.jsonl");
+    expect(ev.rev).toBeGreaterThan(0);
+    const s = ev.session;
+    expect(s.source).toBe("codex");
     expect(s.id).toBe("019d5918-test");
     expect(s.projectPath).toBe("/home/u/proj");
-    expect(s.sourceVersion).toBe("0.118.0");
-    const roles = s.messages.map((m) => m.role);
-    expect(roles.filter((x) => x === "user")).toHaveLength(1);
-    expect(roles.filter((x) => x === "assistant")).toHaveLength(4);
-    expect(roles.filter((x) => x === "tool")).toHaveLength(1);
-    const thinking = s.messages.find((m) => m.thinking);
-    expect(thinking?.role).toBe("assistant");
-    expect(thinking?.content).toBe("");
-    expect(thinking?.thinking).toContain("missing null check");
-    const toolMsg = s.messages.find((m) => m.toolName === "exec_command");
-    expect(toolMsg?.toolInput).toEqual({ cmd: "rg login src" });
-    expect(s.rawMeta.patchFiles).toEqual(["src/auth.ts"]);
-    const lastAssistant = s.messages.filter((m) => m.role === "assistant").at(-1);
-    expect(lastAssistant?.content).toContain("Fixed the login");
+    // Tool calls and their results pair via toolCallId.
+    const call = s.messages.find((m) => m.role === "assistant" && m.toolName === "exec_command");
+    expect(call?.toolCallId).toBe("call_01");
+    const result = s.messages.find((m) => m.role === "tool");
+    expect(result?.toolCallId).toBe(call?.toolCallId);
   });
 
-  test("parses kimi wire.jsonl with agent-scoped id and tokens", async () => {
+  test("dispatches wire.jsonl to the kimi parser (agent-scoped id)", async () => {
     const r = new CodexFamilyReader();
-    const { sessions } = await collect(
+    const { sessions, issues } = await collect(
       r.scan(new LocalTransport(), {
         toolId: "kimi-code",
         files: ["tests/fixtures/kimi/wire.jsonl"],
       }),
     );
-    expect(sessions).toHaveLength(1);
+    expect(issues).toHaveLength(0);
     const s = first(sessions);
+    expect(s.source).toBe("kimi-code");
     expect(s.id.endsWith("/main")).toBe(true);
     expect(s.messages[0]?.content).toBe("deploy docs to gh pages");
-    expect(s.messages[0]?.role).toBe("user");
-    const assistantWithTool = s.messages.find((m) => m.toolName === "exec_command");
-    expect(assistantWithTool?.toolInput).toEqual({ cmd: "mkdocs gh-deploy" });
-    const thinking = s.messages.find((m) => m.thinking);
-    expect(thinking?.role).toBe("assistant");
-    expect(thinking?.thinking).toContain("mkdocs gh-deploy is the simplest path");
-    expect(s.rawMeta.projectHint).toBeUndefined();
   });
 
-  test("parses codewhale single-file json", async () => {
+  test("dispatches .json to the session-document parser", async () => {
     const r = new CodexFamilyReader();
-    const { sessions } = await collect(
+    const { sessions, issues } = await collect(
       r.scan(new LocalTransport(), {
         toolId: "codewhale",
         files: ["tests/fixtures/codewhale/session.json"],
       }),
     );
+    expect(issues).toHaveLength(0);
     const s = first(sessions);
+    expect(s.source).toBe("codewhale");
     expect(s.id).toBe("session");
-    expect(s.projectPath).toBe("/home/u/webapp");
-    expect(s.messages).toHaveLength(3);
-    const toolMsg = s.messages.find((m) => m.toolName === "read_file");
-    expect(toolMsg?.toolInput).toEqual({ path: "package.json" });
+    const call = s.messages.find((m) => m.toolName === "read_file");
+    expect(call?.toolCallId).toBe("call_a");
   });
 
-  test("tolerates corrupt file without throwing", async () => {
+  test("unreadable file yields an issue event instead of throwing", async () => {
     const r = new CodexFamilyReader();
     const { sessions, issues } = await collect(
-      r.scan(new LocalTransport(), { toolId: "codewhale", files: ["/nonexistent/x.json"] }),
+      r.scan(new LocalTransport(), { toolId: "codex", files: ["/nonexistent/x.jsonl"] }),
+    );
+    expect(sessions).toHaveLength(0);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.path).toBe("/nonexistent/x.jsonl");
+  });
+
+  test("corrupt .json document yields an issue event", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "sf-reader-"));
+    const bad = path.join(dir, "broken.json");
+    writeFileSync(bad, "{ not json");
+    const r = new CodexFamilyReader();
+    const { sessions, issues } = await collect(
+      r.scan(new LocalTransport(), { toolId: "codewhale", files: [bad] }),
     );
     expect(sessions).toHaveLength(0);
     expect(issues).toHaveLength(1);
   });
 });
 
-describe("claude-code reader", () => {
-  test("parses messages, tokens, sidechain skip", async () => {
+describe("claude-code adapter", () => {
+  test("emits a session event with source, rev and decoded project path", async () => {
     const r = new ClaudeCodeReader();
-    const { sessions } = await collect(
+    const { sessions, issues } = await collect(
       r.scan(new LocalTransport(), {
         toolId: "claude-code",
         files: ["tests/fixtures/claude/session.jsonl"],
       }),
     );
+    expect(issues).toHaveLength(0);
     expect(sessions).toHaveLength(1);
-    const s = first(sessions);
+    const ev = sessions[0];
+    if (!ev) throw new Error("expected a session event");
+    expect(ev.sourceFile).toBe("tests/fixtures/claude/session.jsonl");
+    expect(ev.rev).toBeGreaterThan(0);
+    const s = ev.session;
+    expect(s.source).toBe("claude-code");
     expect(s.id).toBe("session");
     expect(s.projectPath).toBe("/home/u/api");
-    expect(s.sourceVersion).toBe("2.1.0");
-    expect(s.startedAt).toBe("2026-05-01T10:00:00.000Z");
-    const roles = s.messages.map((m) => m.role);
-    expect(roles).toEqual(["user", "assistant", "assistant", "assistant", "tool"]);
-    const thinking = s.messages.find((m) => m.thinking);
-    expect(thinking?.role).toBe("assistant");
-    expect(thinking?.content).toBe("");
-    expect(thinking?.thinking).toContain("reading the entry file");
-    // redacted_thinking blocks produce no message
-    expect(s.messages.filter((m) => m.thinking)).toHaveLength(1);
-    expect(s.rawMeta.sidechainMessages).toBe(1);
-    expect(s.projectPath).toBe("/home/u/api");
-    const editMsg = s.messages.find((m) => m.toolName === "Edit");
-    expect(editMsg?.toolInput).toEqual({
-      filePath: "/home/u/api/src/app.ts",
-      old_string: "a",
-      new_string: "b",
-    });
-    const assistant = s.messages.find((m) => m.role === "assistant" && m.tokens);
-    expect(assistant?.tokens).toEqual({ input: 5000, output: 120, cacheRead: 800, cacheWrite: 0 });
   });
 
-  test("decodes project slug from path", async () => {
+  test("tool results pair via toolCallId, not a fake toolu: toolName", async () => {
     const r = new ClaudeCodeReader();
     const { sessions } = await collect(
       r.scan(new LocalTransport(), {
@@ -144,6 +141,13 @@ describe("claude-code reader", () => {
         files: ["tests/fixtures/claude/session.jsonl"],
       }),
     );
-    expect(sessions[0]?.rawMeta.slugProject).toBeNull();
+    const s = first(sessions);
+    const call = s.messages.find((m) => m.role === "assistant" && m.toolName === "Edit");
+    expect(call?.toolCallId).toBe("t1");
+    const result = s.messages.find((m) => m.role === "tool");
+    expect(result?.toolCallId).toBe("t1");
+    // The old `toolu:<id>` encoding in toolName is gone.
+    expect(result?.toolName).toBeNull();
+    expect(s.messages.some((m) => m.toolName?.startsWith("toolu:"))).toBe(false);
   });
 });

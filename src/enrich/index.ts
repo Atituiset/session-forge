@@ -1,5 +1,5 @@
+import { collectPatchFiles } from "agent-session-format";
 import type { NirMessage, NirSession } from "../nir/schema.ts";
-import { collectPatchFiles } from "../readers/util.ts";
 
 export interface EnrichedStats {
   rounds: number;

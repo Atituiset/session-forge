@@ -29,6 +29,16 @@ describe("nir schema", () => {
     expect(s.messages[0]?.thinking).toBeNull();
   });
 
+  test("applies the agent-session-format extension defaults", () => {
+    const s = makeNirSession(validSession);
+    expect(s.title).toBeNull();
+    expect(s.model).toBeNull();
+    expect(s.cost).toBeNull();
+    expect(s.messages[0]?.toolCallId).toBeNull();
+    expect(s.messages[0]?.agent).toBeNull();
+    expect(s.messages[0]?.agentLabel).toBeNull();
+  });
+
   test("defaults token usage fields to zero", () => {
     const s = makeNirSession({
       ...validSession,

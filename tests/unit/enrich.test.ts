@@ -10,6 +10,9 @@ function sessionWith(
     id: "t",
     source: "test",
     sourceVersion: null,
+    title: null,
+    model: null,
+    cost: null,
     projectPath: null,
     startedAt: "2026-01-01T10:00:00Z",
     endedAt: "2026-01-01T10:10:00Z",
@@ -24,7 +27,10 @@ const base = {
   tokens: undefined,
   toolName: null,
   toolInput: null,
+  toolCallId: null,
   thinking: null,
+  agent: null,
+  agentLabel: null,
 };
 
 describe("enrich", () => {
