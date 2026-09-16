@@ -5,7 +5,7 @@
     "": {
       "name": "session-forge",
       "dependencies": {
-        "agent-session-format": "github:Atituiset/agent-session-format#v0.1.0",
+        "agent-session-format": "github:Atituiset/agent-session-format#v0.1.1",
         "commander": "^15.0.0",
         "ssh2": "^1.17.0",
         "zod": "^4.4.3",
@@ -112,7 +112,7 @@
 
     "@typescript/typescript-win32-x64": ["@typescript/typescript-win32-x64@7.0.2", "https://registry.npmmirror.com/@typescript/typescript-win32-x64/-/typescript-win32-x64-7.0.2.tgz", { "os": "win32", "cpu": "x64" }, "sha512-0BQ3HkAHHlKLSp1qRvf3SUhGpGsDuhB/jgFw75guyqbxJqEaS0Cw/VFO8i2nHglJUzQCRtMMR/IBAKE3ETMC4g=="],
 
-    "agent-session-format": ["agent-session-format@github:Atituiset/agent-session-format#b646a7c", { "dependencies": { "zod": "^4.4.3" } }, "Atituiset-agent-session-format-b646a7c", "sha512-0auoT5ZaRGO4qz+D8wKtz1Gt2VKTxasiSGWNUwK7Z356+nidBa6LttGgcrRP7P6gOMPzBoFhCVMUeq0yVxE/dg=="],
+    "agent-session-format": ["agent-session-format@github:Atituiset/agent-session-format#5b82266", { "dependencies": { "zod": "^4.4.3" } }, "Atituiset-agent-session-format-5b82266", "sha512-Y+GmL+eSqaG3k3cqqCfr1lkzTEkgN/wtVmen47OymRXlIaS08XeDu5TpGm4+NvpDOUcMWHaleWYYF6jA/tT73A=="],
 
     "asn1": ["asn1@0.2.6", "https://registry.npmmirror.com/asn1/-/asn1-0.2.6.tgz", { "dependencies": { "safer-buffer": "~2.1.0" } }, "sha512-ix/FxPn0MDjeyJ7i/yoHGFt/EX6LyNbxSEhPPXODPL+KB0VPk86UYfL0lMdy+KCnv+fmvIzySwaK5COwqVbWTQ=="],
 
