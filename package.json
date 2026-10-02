@@ -1,6 +1,6 @@
 {
   "name": "session-forge",
-  "version": "0.1.27",
+  "version": "0.2.0",
   "description": "The session hub for AI coding agents — every CLI, every machine, one searchable memory. Relay sessions between agents mid-task.",
   "keywords": [
     "claude-code",
