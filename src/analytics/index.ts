@@ -7,6 +7,8 @@ export interface Totals {
   deletions: number;
   tokensIn: number;
   tokensOut: number;
+  /** Cached portion of tokensIn (cache read + cache write). */
+  tokensCache: number;
   cost: number;
   rounds: number;
 }
@@ -40,6 +42,7 @@ export function totals(rows: SessionSummary[]): Totals {
     deletions: 0,
     tokensIn: 0,
     tokensOut: 0,
+    tokensCache: 0,
     cost: 0,
     rounds: 0,
   };
@@ -50,6 +53,7 @@ export function totals(rows: SessionSummary[]): Totals {
     t.deletions += r.deletions;
     t.tokensIn += r.tokensIn;
     t.tokensOut += r.tokensOut;
+    t.tokensCache += r.tokensCache;
     t.cost += r.cost ?? 0;
     t.rounds += r.rounds;
   }

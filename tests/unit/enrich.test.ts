@@ -47,7 +47,7 @@ describe("enrich", () => {
     expect(stats.durationMs).toBe(600_000);
   });
 
-  test("uses reported tokens when available", () => {
+  test("uses reported tokens when available, cache included", () => {
     const s = sessionWith([
       {
         ...base,
@@ -58,8 +58,27 @@ describe("enrich", () => {
     ]);
     const stats = enrichSession(s);
     expect(stats.tokenSource).toBe("reported");
-    expect(stats.tokensIn).toBe(100);
+    // 消耗量 = fresh input + cacheRead + cacheWrite；缓存部分单独体现
+    expect(stats.tokensIn).toBe(105);
+    expect(stats.tokensCache).toBe(5);
     expect(stats.tokensOut).toBe(20);
+  });
+
+  test("session-level tokens win over (incomplete) per-message sums", () => {
+    const s = sessionWith([
+      { ...base, role: "user", content: "q" },
+      {
+        ...base,
+        role: "assistant",
+        content: "x",
+        tokens: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+      },
+    ]);
+    s.tokens = { input: 800, output: 120, cacheRead: 4200, cacheWrite: 0 };
+    const stats = enrichSession(s);
+    expect(stats.tokensIn).toBe(5000);
+    expect(stats.tokensCache).toBe(4200);
+    expect(stats.tokensOut).toBe(120);
   });
 
   test("extracts files from Edit/Write inputs", () => {

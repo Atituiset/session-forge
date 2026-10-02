@@ -1028,6 +1028,7 @@ function printReport(rows: SessionSummary[], granularity: "day" | "week" | "mont
   console.log(
     ` sessions: ${t.sessions}   projects: ${t.projects}   rounds: ${t.rounds}\n` +
       ` diff: +${t.additions} / -${t.deletions}   tokens(in/out): ${formatTokens(t.tokensIn)} / ${formatTokens(t.tokensOut)}` +
+      (t.tokensCache > 0 ? `   cached: ${formatTokens(t.tokensCache)}` : "") +
       (t.cost > 0 ? `\n cost estimate: $${t.cost.toFixed(2)}` : ""),
   );
 

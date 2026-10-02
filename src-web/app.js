@@ -251,7 +251,7 @@ function render(d) {
     ["Sessions", fmt(totals.sessions), t("metricSessionsSub", { projects: totals.projects })],
     [t("metricRounds"), fmt(totals.rounds), t("metricRoundsSub")],
     [t("metricChanges"), `+${fmt(totals.additions)}`, t("metricChangesSub", { deletions: fmt(totals.deletions) })],
-    [t("metricTokens"), fmt(totals.tokensIn), `out ${fmt(totals.tokensOut)}`],
+    [t("metricTokens"), fmt(totals.tokensIn), `out ${fmt(totals.tokensOut)}${totals.tokensCache > 0 ? ` · ${t("cacheUnit")} ${fmt(totals.tokensCache)}` : ""}`],
   ].map(([l, v, s]) =>
     `<div class="card metric"><div class="label">${l}</div><div class="value">${v}</div><div class="sub">${s}</div></div>`
   ).join("");
@@ -878,7 +878,9 @@ function renderSessionDetail(j) {
     (s) => s.source === j.source && s.id === j.id,
   );
   const stats = row
-    ? `<b>${fmt(row.tokensIn)}</b> in · <b>${fmt(row.tokensOut)}</b> out · <b>${row.rounds}</b> ${esc(t("roundsUnit"))}`
+    ? `<b>${fmt(row.tokensIn)}</b> in · <b>${fmt(row.tokensOut)}</b> out` +
+      (row.tokensCache > 0 ? ` · <b>${fmt(row.tokensCache)}</b> ${esc(t("cacheUnit"))}` : "") +
+      ` · <b>${row.rounds}</b> ${esc(t("roundsUnit"))}`
     : `<b>${(j.messages ?? []).length}</b> ${esc(t("messagesUnit"))}`;
   const twin = j.rawMeta?.localPath && j.rawMeta.localPath !== j.projectPath
     ? `<div class="sub" style="width:100%;font-family:var(--mono);font-size:10.5px;color:var(--dim)" title="${esc(j.rawMeta.localPath)}">${esc(t("localPathLabel"))}${esc(j.rawMeta.localPath)}</div>`

@@ -25,7 +25,9 @@ export class Store {
   // On upgrade the stored revs are reset so every session file is
   // re-ingested once — rows are updated in place via upsert, so tags and
   // other row data survive.
-  private static readonly INGEST_FORMAT_VERSION = 3;
+  // v4: token counting now includes cacheRead/cacheWrite (agent-session-format
+  // 0.4) — re-ingest so dashboard totals pick up cached-token volume.
+  private static readonly INGEST_FORMAT_VERSION = 4;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
@@ -67,6 +69,7 @@ export class Store {
       "ALTER TABLE sessions ADD COLUMN token_source TEXT NOT NULL DEFAULT 'none'",
       "ALTER TABLE sessions ADD COLUMN has_error INTEGER NOT NULL DEFAULT 0",
       "ALTER TABLE sessions ADD COLUMN local_path TEXT",
+      "ALTER TABLE sessions ADD COLUMN tokens_cache INTEGER NOT NULL DEFAULT 0",
     ]) {
       try {
         this.db.exec(ddl);
@@ -84,13 +87,14 @@ export class Store {
     }
     this.upsertStmt = this.db.prepare(
       `INSERT INTO sessions (source, id, rev, project_path, started_at, ended_at, model,
-         tokens_in, tokens_out, token_source, cost, rounds, files_json, additions,
+         tokens_in, tokens_out, tokens_cache, token_source, cost, rounds, files_json, additions,
          deletions, has_error, local_path, raw, scanned_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(source, id) DO UPDATE SET
          rev=excluded.rev, project_path=excluded.project_path, started_at=excluded.started_at,
          ended_at=excluded.ended_at, model=excluded.model, tokens_in=excluded.tokens_in,
-         tokens_out=excluded.tokens_out, token_source=excluded.token_source,
+         tokens_out=excluded.tokens_out, tokens_cache=excluded.tokens_cache,
+         token_source=excluded.token_source,
          cost=excluded.cost, rounds=excluded.rounds,
          files_json=excluded.files_json, additions=excluded.additions,
          deletions=excluded.deletions, has_error=excluded.has_error,
@@ -141,6 +145,7 @@ export class Store {
       lastModel(session),
       stats.tokensIn,
       stats.tokensOut,
+      stats.tokensCache,
       stats.tokenSource,
       typeof session.rawMeta.cost === "number" ? session.rawMeta.cost : null,
       stats.rounds,
@@ -242,7 +247,7 @@ export class Store {
     return this.db
       .prepare(
         `SELECT source, id, project_path AS projectPath, started_at AS startedAt, ended_at AS endedAt,` +
-          ` model, tokens_in AS tokensIn, tokens_out AS tokensOut, token_source AS tokenSource, cost, rounds,` +
+          ` model, tokens_in AS tokensIn, tokens_out AS tokensOut, tokens_cache AS tokensCache, token_source AS tokenSource, cost, rounds,` +
           ` files_json AS filesJson, additions, deletions, has_error AS hasError, local_path AS localPath, tags AS tagsJson, ${rawExpr} FROM sessions${whereSql}`,
       )
       .all(...params) as SessionSummary[];
@@ -287,7 +292,7 @@ export class Store {
     const sessions = this.db
       .prepare(
         `SELECT source, id, project_path AS projectPath, started_at AS startedAt, ended_at AS endedAt,` +
-          ` model, tokens_in AS tokensIn, tokens_out AS tokensOut, token_source AS tokenSource, cost, rounds,` +
+          ` model, tokens_in AS tokensIn, tokens_out AS tokensOut, tokens_cache AS tokensCache, token_source AS tokenSource, cost, rounds,` +
           ` files_json AS filesJson, additions, deletions, has_error AS hasError, local_path AS localPath, tags AS tagsJson, NULL AS raw` +
           ` FROM sessions${whereSql} ORDER BY started_at IS NULL, started_at DESC LIMIT ? OFFSET ?`,
       )
@@ -359,6 +364,7 @@ export class Store {
                 SUM(rounds) AS rounds,
                 SUM(tokens_in) AS tokensIn,
                 SUM(tokens_out) AS tokensOut,
+                SUM(tokens_cache) AS tokensCache,
                 SUM(additions) AS additions,
                 SUM(deletions) AS deletions
            FROM sessions GROUP BY machine
@@ -433,6 +439,8 @@ export interface SessionSummary {
   model: string | null;
   tokensIn: number;
   tokensOut: number;
+  /** Cached portion of tokensIn (cache read + cache write). */
+  tokensCache: number;
   tokenSource: "reported" | "estimated" | "none";
   cost: number | null;
   rounds: number;
@@ -455,6 +463,7 @@ export interface MachineSummary {
   rounds: number;
   tokensIn: number;
   tokensOut: number;
+  tokensCache: number;
   additions: number;
   deletions: number;
 }
@@ -465,6 +474,7 @@ export interface ProjectCard {
   sessions: number;
   tools: number;
   tokensIn: number;
+  tokensCache: number;
   firstAt: string | null;
   lastAt: string | null;
 }

@@ -194,7 +194,7 @@ describe("store", () => {
     const check = new Database(dbPath, { readonly: true });
     expect(
       (check.prepare("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(3);
+    ).toBe(4);
     check.close();
     // Second open: format already current → no reset, rev dedup works again.
     const again = new Store(dbPath);

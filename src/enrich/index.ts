@@ -6,8 +6,11 @@ export interface EnrichedStats {
   filesTouched: string[];
   additions: number;
   deletions: number;
+  /** Total input-side tokens consumed: fresh input + cacheRead + cacheWrite. */
   tokensIn: number;
   tokensOut: number;
+  /** Cached portion of tokensIn (cacheRead + cacheWrite) — billed much cheaper. */
+  tokensCache: number;
   tokenSource: "reported" | "estimated" | "none";
   durationMs: number | null;
   hasError: boolean;
@@ -37,6 +40,7 @@ export function enrichSession(session: NirSession): EnrichedStats {
   const errors = new Set<string>();
   let reportedIn = 0;
   let reportedOut = 0;
+  let reportedCache = 0;
 
   collectPatchFilesFromMeta(session, files);
   if (typeof session.rawMeta.additions === "number") additions += session.rawMeta.additions;
@@ -44,8 +48,11 @@ export function enrichSession(session: NirSession): EnrichedStats {
 
   for (const m of session.messages) {
     if (m.role === "user") rounds++;
-    reportedIn += m.tokens?.input ?? 0;
+    // NIR semantics: input is fresh (non-cached); cached portions ride in
+    // cacheRead/cacheWrite. "消耗量" = all three plus output.
+    reportedIn += (m.tokens?.input ?? 0) + (m.tokens?.cacheRead ?? 0) + (m.tokens?.cacheWrite ?? 0);
     reportedOut += m.tokens?.output ?? 0;
+    reportedCache += (m.tokens?.cacheRead ?? 0) + (m.tokens?.cacheWrite ?? 0);
     scanErrors(m, errors);
     collectFiles(m.toolName, m.toolInput, files);
     countDiff(m, (add, del) => {
@@ -54,10 +61,21 @@ export function enrichSession(session: NirSession): EnrichedStats {
     });
   }
 
+  // Session-level totals (opencode rows, codex token_count, kimi turn sums)
+  // are authoritative: per-message usage is often incomplete, so summing
+  // messages undercounts. Fall back to message sums when absent (claude).
+  const st = session.tokens;
+  if (st && st.input + st.output + st.cacheRead + st.cacheWrite > 0) {
+    reportedIn = st.input + st.cacheRead + st.cacheWrite;
+    reportedOut = st.output;
+    reportedCache = st.cacheRead + st.cacheWrite;
+  }
+
   const tokenSource =
     reportedIn + reportedOut > 0 ? "reported" : estimateTokens(session) > 0 ? "estimated" : "none";
   const tokensIn = tokenSource === "reported" ? reportedIn : estimateTokens(session);
   const tokensOut = tokenSource === "reported" ? reportedOut : 0;
+  const tokensCache = tokenSource === "reported" ? reportedCache : 0;
 
   return {
     rounds,
@@ -66,6 +84,7 @@ export function enrichSession(session: NirSession): EnrichedStats {
     deletions,
     tokensIn,
     tokensOut,
+    tokensCache,
     tokenSource,
     durationMs: computeDuration(session),
     hasError: errors.size > 0,
