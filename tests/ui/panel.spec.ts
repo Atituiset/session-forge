@@ -688,3 +688,152 @@ test.describe("session detail sticky header", () => {
     expect(Math.abs((headBox?.y ?? 999) - (panelBox?.y ?? 0))).toBeLessThanOrEqual(2);
   });
 });
+
+test.describe("tool call rendering", () => {
+  test.beforeAll(ensureScanned);
+
+  test("bash input renders as highlighted command, not raw JSON; bare calls become tool rows", async ({
+    page,
+  }) => {
+    await page.route("**/api/session?**", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          source: "claude-code",
+          id: "tool-stub",
+          projectPath: "/home/ci/proj-alpha",
+          startedAt: "2026-08-20T10:00:00Z",
+          endedAt: null,
+          model: "claude-opus-4.1",
+          tokensIn: 100,
+          tokensOut: 10,
+          rounds: 1,
+          rawMeta: {},
+          messages: [
+            // bare assistant tool call: no prose — must render as a tool row,
+            // not an empty bubble
+            {
+              role: "assistant",
+              content: "",
+              timestamp: "2026-08-20T10:00:10Z",
+              toolName: "Bash",
+              toolInput: { command: "git status --short", description: "check repo state" },
+              model: "claude-opus-4.1",
+              thinking: null,
+            },
+            {
+              role: "tool",
+              content: " M src/relay.ts",
+              timestamp: "2026-08-20T10:00:11Z",
+              toolName: "Bash",
+              toolInput: null,
+              model: null,
+              thinking: null,
+            },
+            // prose + tool call in one assistant message
+            {
+              role: "assistant",
+              content: "Let me check the store.",
+              timestamp: "2026-08-20T10:01:00Z",
+              toolName: "Read",
+              toolInput: { file_path: "src/store.ts", offset: 360 },
+              model: "claude-opus-4.1",
+              thinking: null,
+            },
+            // unknown tool, structured input → pretty JSON fallback
+            {
+              role: "tool",
+              content: "ok",
+              timestamp: "2026-08-20T10:02:00Z",
+              toolName: "mcp__custom",
+              toolInput: { nested: { a: 1 }, flag: true },
+              model: null,
+              thinking: null,
+            },
+          ],
+        }),
+      }),
+    );
+    await page.goto(PANEL);
+    await enterAlphaProject(page);
+    await page.locator(".session-row").first().click();
+    const detail = page.locator("#session-detail");
+    await expect(detail.locator(".msg.tool").first()).toBeVisible({ timeout: 10_000 });
+
+    // Bash 输入是命令块（带 hljs bash 高亮），而不是 {"command": ...} 的 JSON
+    const bashRow = detail.locator(".msg.tool", { hasText: "Bash" }).first();
+    await bashRow.locator("summary").click();
+    await expect(bashRow.locator("pre.tool-cmd code.language-bash")).toContainText(
+      "git status --short",
+    );
+    await expect(bashRow.locator(".tool-kv")).toContainText("description");
+    await expect(detail).not.toContainText('"command"');
+
+    // 裸工具调用不产生空气泡
+    const emptyAssistantBodies = detail.locator(".msg.assistant .body", { hasText: /^\s*$/ });
+    await expect(emptyAssistantBodies).toHaveCount(0);
+
+    // prose + 调用同条：正文气泡内挂内联工具块
+    const prose = detail.locator(".msg.assistant", { hasText: "Let me check the store." });
+    await expect(prose.locator(".msg.tool.inline summary")).toContainText("Read");
+    await expect(prose.locator("pre.tool-primary")).toContainText("src/store.ts");
+    await expect(prose.locator(".tool-kv")).toContainText("offset");
+
+    // 结构化未知输入回退 pretty JSON
+    const custom = detail.locator(".msg.tool", { hasText: "mcp__custom" });
+    await custom.locator("summary").click();
+    await expect(custom.locator("pre").first()).toContainText('"nested"');
+  });
+});
+
+test.describe("tool call rendering (codex exec_command wrapper)", () => {
+  test.beforeAll(ensureScanned);
+
+  test("{raw: text(await tools.exec_command({cmd:...}))} unwraps to the real command", async ({
+    page,
+  }) => {
+    await page.route("**/api/session?**", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          source: "codex",
+          id: "raw-stub",
+          projectPath: "/home/ci/proj-alpha",
+          startedAt: "2026-08-20T10:00:00Z",
+          endedAt: null,
+          model: "gpt-6-astra",
+          tokensIn: 100,
+          tokensOut: 10,
+          rounds: 1,
+          rawMeta: {},
+          messages: [
+            {
+              role: "assistant",
+              content: "",
+              timestamp: "2026-08-20T10:00:10Z",
+              toolName: "exec",
+              toolInput: {
+                raw: 'text(await tools.exec_command({cmd:"df -hT; du -x -h --max-depth=1 /home \\"quoted\\"","max_output_tokens":3500,"yield_time_ms":1000}));\n',
+              },
+              model: "gpt-6-astra",
+              thinking: null,
+            },
+          ],
+        }),
+      }),
+    );
+    await page.goto(PANEL);
+    await enterAlphaProject(page);
+    await page.locator(".session-row").first().click();
+    const row = page.locator(".msg.tool", { hasText: "exec" }).first();
+    await row.locator("summary").click();
+    // 真命令被解出并高亮；包装层 exec_command(…) 不出现
+    await expect(row.locator("pre.tool-cmd code.language-bash")).toContainText(
+      'df -hT; du -x -h --max-depth=1 /home "quoted"',
+    );
+    await expect(row).not.toContainText("exec_command(");
+    // 次要参数收成 kv
+    await expect(row.locator(".tool-kv")).toContainText("max_output_tokens");
+    await expect(row.locator(".tool-kv")).toContainText("3500");
+  });
+});

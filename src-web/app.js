@@ -725,27 +725,110 @@ const renderMd = (() => {
   };
 })();
 
+/* Tool call/result rendering: lead with the primary field (the command, the
+   file path, the pattern) instead of dumping raw JSON. Bash-style commands
+   get hljs bash highlighting; secondary keys collapse into compact kv lines;
+   genuinely structured inputs fall back to pretty JSON. */
+const TOOL_PRIMARY_KEYS = [
+  "command", "cmd", "file_path", "path", "pattern", "query", "url", "content", "input",
+];
+
+const cmdBlock = (cmd) => {
+  if (typeof hljs !== "undefined") {
+    let html = esc(cmd);
+    try { html = hljs.highlight(cmd, { language: "bash" }).value; } catch {}
+    return `<pre class="tool-cmd"><code class="hljs language-bash">${html}</code></pre>`;
+  }
+  return `<pre class="tool-primary">${esc(cmd)}</pre>`;
+};
+
+const kvLines = (pairs) =>
+  pairs.length
+    ? `<div class="tool-kv">${pairs
+        .map(([k, v]) => `<div><span class="k">${esc(k)}</span> ${esc(v)}</div>`)
+        .join("")}</div>`
+    : "";
+
+function renderToolInput(name, input) {
+  if (input == null) return "";
+  if (typeof input === "object" && !Array.isArray(input)) {
+    // Codex-family fallback shape: {raw: "..."} when arguments aren't clean JSON.
+    const ks = Object.keys(input).filter((k) => input[k] != null && input[k] !== "");
+    if (ks.length === 1 && ks[0] === "raw" && typeof input.raw === "string") input = input.raw;
+  }
+  if (typeof input === "string") {
+    // Newer codex wraps shell calls as text(await tools.exec_command({cmd:"…",…}))
+    // — dig the real command out of the JS-ish wrapper instead of showing it raw.
+    const m =
+      /(?:exec_command|shell|bash)\(\s*\{[\s\S]*?["']?(?:cmd|command)["']?\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(
+        input,
+      );
+    if (m) {
+      let cmd = m[1] ?? "";
+      try { cmd = JSON.parse(`"${cmd}"`); } catch {}
+      const params = [];
+      const pm = /["']?(\w+)["']?\s*:\s*("(?:[^"\\]|\\.)*"|\d+(?:\.\d+)?|true|false)/g;
+      let p;
+      while ((p = pm.exec(input))) {
+        if (p[1] === "cmd" || p[1] === "command") continue;
+        params.push([p[1], (p[2] ?? "").replace(/^"|"$/g, "")]);
+      }
+      return cmdBlock(cmd) + kvLines(params);
+    }
+    return longPre(input);
+  }
+  if (typeof input !== "object" || Array.isArray(input)) return longPre(pretty(input));
+  const keys = Object.keys(input).filter((k) => input[k] != null && input[k] !== "");
+  if (!keys.length) return "";
+  const isCmd = /bash|shell|exec|terminal/i.test(name ?? "");
+  const primaryKey =
+    (isCmd && keys.find((k) => k === "command" || k === "cmd")) ||
+    keys.find((k) => TOOL_PRIMARY_KEYS.includes(k) && typeof input[k] === "string");
+  if (!primaryKey) return longPre(pretty(input));
+  const primary = String(input[primaryKey]);
+  const block = isCmd ? cmdBlock(primary) : `<pre class="tool-primary">${esc(primary)}</pre>`;
+  const rest = keys
+    .filter((k) => k !== primaryKey)
+    .map((k) => [k, typeof input[k] === "string" ? input[k] : JSON.stringify(input[k])]);
+  return block + kvLines(rest);
+}
+
 function renderMsg(m, toolNames) {
   const when = m.timestamp ? `<time>${fmtTime(m.timestamp)}</time>` : "";
   if (m.role === "system") {
     return `<div class="msg system">${esc(short(m.content ?? "", 300))}</div>`;
   }
-  if (m.role === "tool") {
+  // A bare assistant tool call (no prose, no thinking) renders as a tool row,
+  // same as its result — previously it produced an empty bubble and the input
+  // was invisible.
+  const isBareToolCall =
+    m.role === "assistant" && m.toolName && !(m.content ?? "").trim() && !m.thinking;
+  if (m.role === "tool" || isBareToolCall) {
     // Tool results carry no toolName — pair back to the call via toolCallId.
     const name = m.toolName ?? (m.toolCallId && toolNames?.get(m.toolCallId)) ?? "tool";
     return `<div class="msg tool"><details>
       <summary>${esc(t("toolPrefix"))} · ${esc(name)}${m.timestamp ? ` · ${fmtTime(m.timestamp)}` : ""}</summary>
-      ${m.toolInput != null ? longPre(pretty(m.toolInput)) : ""}
+      ${renderToolInput(name, m.toolInput)}
       ${m.content ? longPre(m.content) : ""}
     </details></div>`;
   }
   const thinking = m.thinking
     ? `<details class="thinking"><summary>${esc(t("thinkingProcess"))}</summary><pre>${esc(m.thinking)}</pre></details>`
     : "";
+  // An assistant message that ALSO calls a tool keeps its prose bubble, with
+  // the call input attached as a compact block.
+  const toolCall =
+    m.role === "assistant" && m.toolName && m.toolInput != null
+      ? `<div class="msg tool inline"><details>
+          <summary>${esc(t("toolPrefix"))} · ${esc(m.toolName)}</summary>
+          ${renderToolInput(m.toolName, m.toolInput)}
+        </details></div>`
+      : "";
   return `<div class="msg ${m.role === "user" ? "user" : "assistant"}">
     <div class="who">${m.role === "user" ? "USER" : `ASSISTANT${m.model ? ` · ${esc(m.model)}` : ""}`}${when}</div>
     ${thinking}
     ${m.content ? (m.role === "user" ? `<div class="body">${esc(m.content)}</div>` : renderMd(m.content)) : ""}
+    ${toolCall}
   </div>`;
 }
 
