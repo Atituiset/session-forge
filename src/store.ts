@@ -27,7 +27,11 @@ export class Store {
   // other row data survive.
   // v4: token counting now includes cacheRead/cacheWrite (agent-session-format
   // 0.4) — re-ingest so dashboard totals pick up cached-token volume.
-  private static readonly INGEST_FORMAT_VERSION = 4;
+  // v5: tool results carry a structured success/failure verdict
+  // (agent-session-format 0.5, `NirMessage.toolResult`) — re-ingest so the
+  // stored NIR exposes it. Measured effect on a real corpus: opencode goes from
+  // ~0.2% decidable outcomes (regex-only) to 100% source-reported.
+  private static readonly INGEST_FORMAT_VERSION = 5;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
