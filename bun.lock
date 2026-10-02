@@ -5,7 +5,7 @@
     "": {
       "name": "session-forge",
       "dependencies": {
-        "agent-session-format": "^0.6.0",
+        "agent-session-format": "^0.8.0",
         "commander": "^15.0.0",
         "ssh2": "^1.17.0",
         "zod": "^4.4.3",
@@ -112,7 +112,7 @@
 
     "@typescript/typescript-win32-x64": ["@typescript/typescript-win32-x64@7.0.2", "https://registry.npmmirror.com/@typescript/typescript-win32-x64/-/typescript-win32-x64-7.0.2.tgz", { "os": "win32", "cpu": "x64" }, "sha512-0BQ3HkAHHlKLSp1qRvf3SUhGpGsDuhB/jgFw75guyqbxJqEaS0Cw/VFO8i2nHglJUzQCRtMMR/IBAKE3ETMC4g=="],
 
-    "agent-session-format": ["agent-session-format@0.6.0", "", { "dependencies": { "zod": "^4.4.3" } }, "sha512-WiVCAK+IywFbuSRfYvId68PALDAPoxhJg+HlhnyiOXRMVtE4vBeHI8uWOYCVK/QVYUraewnOGV/DtsxKZC0SPg=="],
+    "agent-session-format": ["agent-session-format@0.8.0", "https://registry.npmmirror.com/agent-session-format/-/agent-session-format-0.8.0.tgz", { "dependencies": { "zod": "^4.4.3" } }, "sha512-E7gxvUAIqgFLTWPem1MEqF3h0vpmzvsV9iBFt0ORRq388K8RZ1TLHMEEW0TrbkMaW6QLexH0nQ0hs0ard5yIxg=="],
 
     "asn1": ["asn1@0.2.6", "https://registry.npmmirror.com/asn1/-/asn1-0.2.6.tgz", { "dependencies": { "safer-buffer": "~2.1.0" } }, "sha512-ix/FxPn0MDjeyJ7i/yoHGFt/EX6LyNbxSEhPPXODPL+KB0VPk86UYfL0lMdy+KCnv+fmvIzySwaK5COwqVbWTQ=="],
 
