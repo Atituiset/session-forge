@@ -31,7 +31,15 @@ export class Store {
   // (agent-session-format 0.5, `NirMessage.toolResult`) — re-ingest so the
   // stored NIR exposes it. Measured effect on a real corpus: opencode goes from
   // ~0.2% decidable outcomes (regex-only) to 100% source-reported.
-  private static readonly INGEST_FORMAT_VERSION = 5;
+  // v6: enrich reads that verdict instead of regexing tool output. The regex
+  // flagged 234 opencode sessions while the source called every one of them
+  // `success` — agent output quotes failure text constantly. Re-ingest to
+  // rewrite `has_error` with the corrected signal.
+  // v7: agent-session-format 0.6 reads codex/kimi exec envelopes
+  // ("Exit code: N", "Process exited with code N"), which 0.5 wrongly recorded as
+  // signal-free. Measured: codex outcome coverage 5.8% → 79.2% of tool calls,
+  // 109 real errors that were previously invisible.
+  private static readonly INGEST_FORMAT_VERSION = 7;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;

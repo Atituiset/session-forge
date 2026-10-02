@@ -38,7 +38,7 @@
     "desktop:build": "tauri build"
   },
   "dependencies": {
-    "agent-session-format": "^0.5.0",
+    "agent-session-format": "^0.6.0",
     "commander": "^15.0.0",
     "ssh2": "^1.17.0",
     "zod": "^4.4.3"

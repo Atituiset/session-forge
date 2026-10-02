@@ -19,6 +19,23 @@ export interface EnrichedStats {
 
 const FILE_KEYS = ["filePath", "file_path", "path", "file", "notebook_path"];
 
+// FALLBACK error detection, used ONLY for sources that expose no verdict.
+//
+// NIR 0.5.0 carries `NirMessage.toolResult` — a source-reported success/failure
+// verdict — and `scanErrors` consults it first. Regexing content on top of that
+// produced a flood of false positives, because agent output quotes failure text
+// constantly. Measured on 234 flagged opencode sessions: of every regex hit,
+// **0** were confirmed by a source verdict, and 206 had a source verdict saying
+// `success`. Real examples of what the regex matched in a SUCCESSFUL run:
+//
+//   compile_error ← a Python file containing the comment "# check if compilation failed"
+//   Traceback     ← a `manifest.csv` listing python3 in /usr/bin, output ends "Traceback (most recent call last):"
+//   test_failure ← an enum whose description is "Defaults to DONE. Return FAILED"
+//   test_failure ← a compiled Rust test harness printing its own test-name table
+//
+// So these patterns are now scoped to `role === "tool"` (never `user` — a user
+// pasting a log is not an error), and only consulted for messages the source
+// itself did not judge. A source verdict always wins.
 const ERROR_PATTERNS: [string, RegExp][] = [
   ["ENOENT", /\bENOENT\b/],
   ["EACCES", /\bEACCES\b|\bEPERM\b/],
@@ -182,9 +199,26 @@ function collectPatchFilesFromMeta(session: NirSession, out: Set<string>): void 
   }
 }
 
+/**
+ * Record error signals for one message.
+ *
+ * Priority is the whole point: a source-reported verdict (NIR 0.5.0) is
+ * authoritative and is recorded under its own name. The regex fallback runs ONLY
+ * when the source offered nothing — see the note above ERROR_PATTERNS for the
+ * measured false-positive rate that motivated this.
+ */
 function scanErrors(m: NirMessage, out: Set<string>): void {
-  if (m.role !== "tool" && m.role !== "user") return;
-  if (m.content.length > 50_000) return;
+  // A source verdict, when present, is the answer. Nothing to infer.
+  if (m.toolResult) {
+    if (m.toolResult.status === "error") {
+      out.add(`source_${m.toolResult.method}`);
+    }
+    return;
+  }
+  // Fallback: tool results only. A user pasting a failure log is not an error
+  // the agent hit — it is the input they gave it.
+  if (m.role !== "tool") return;
+  if (!m.content || m.content.length > 50_000) return;
   for (const [name, re] of ERROR_PATTERNS) {
     if (re.test(m.content)) out.add(name);
   }
