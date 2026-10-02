@@ -638,3 +638,53 @@ test.describe("markdown rendering in session detail", () => {
     await expect(userBody.locator("strong")).toHaveCount(0);
   });
 });
+
+test.describe("session detail sticky header", () => {
+  test.beforeAll(ensureScanned);
+
+  test("header with relay controls stays visible after scrolling to the bottom", async ({
+    page,
+  }) => {
+    const messages = Array.from({ length: 60 }, (_, i) => ({
+      role: i % 2 ? "assistant" : "user",
+      content: `message ${i} — filler content to make the session long enough to scroll`,
+      timestamp: "2026-08-20T10:00:00Z",
+      toolName: null,
+      toolInput: null,
+      model: i % 2 ? "claude-opus-4.1" : null,
+      thinking: null,
+    }));
+    await page.route("**/api/session?**", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          source: "claude-code",
+          id: "long-stub",
+          projectPath: "/home/ci/proj-alpha",
+          startedAt: "2026-08-20T10:00:00Z",
+          endedAt: null,
+          model: "claude-opus-4.1",
+          tokensIn: 100,
+          tokensOut: 10,
+          rounds: 30,
+          rawMeta: {},
+          messages,
+        }),
+      }),
+    );
+    await page.goto(PANEL);
+    await enterAlphaProject(page);
+    await page.locator(".session-row").first().click();
+    await expect(page.locator("#btn-relay")).toBeVisible({ timeout: 10_000 });
+    // 滚到底部，头部仍应钉在顶部
+    const panel = page.locator("#session-detail");
+    await panel.evaluate((el) => (el.scrollTop = el.scrollHeight));
+    await page.waitForTimeout(300);
+    await expect(page.locator("#btn-relay")).toBeVisible();
+    const headBox = await page.locator(".sess-head").boundingBox();
+    const panelBox = await panel.boundingBox();
+    expect(headBox).toBeTruthy();
+    expect(panelBox).toBeTruthy();
+    expect(Math.abs((headBox?.y ?? 999) - (panelBox?.y ?? 0))).toBeLessThanOrEqual(2);
+  });
+});

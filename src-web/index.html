@@ -330,8 +330,13 @@
     box-shadow: 0 18px 60px rgba(0,0,0,.55); }
   .overlay-panel::-webkit-scrollbar { width: 9px; }
   .overlay-panel::-webkit-scrollbar-thumb { background: rgba(120,160,255,.18); border-radius: 5px; }
-  .sess-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-    padding-bottom: 12px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
+  /* Sticky header: relay/close stay reachable while scrolling long sessions.
+     top/margins compensate the panel's 18px/20px padding so the header spans
+     edge-to-edge and covers the padding strip when stuck. */
+  .sess-head { position: sticky; top: -18px; z-index: 2; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin: -18px -20px 14px; padding: 18px 20px 12px;
+    background: rgba(14,21,38,.88); backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--line); }
   .sess-head .proj { font-family: var(--mono); font-size: 13px; min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sess-head .stats { font-family: var(--mono); font-size: 11px; color: var(--dim); }
