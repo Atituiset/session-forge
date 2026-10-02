@@ -8,6 +8,10 @@ import panelI18nJs from "../src-web/i18n.js" with { type: "text" };
 // Panel assets are embedded into the compiled binary so `serve` is
 // self-contained: open http://127.0.0.1:<port>/ and the panel is right there.
 import panelHtml from "../src-web/index.html" with { type: "text" };
+import vendorPurify from "../src-web/vendor/dompurify.min.js" with { type: "text" };
+import vendorHljs from "../src-web/vendor/highlight.min.js" with { type: "text" };
+import vendorHljsCss from "../src-web/vendor/highlight-dark.css" with { type: "text" };
+import vendorMarked from "../src-web/vendor/marked.min.js" with { type: "text" };
 import {
   aggregateByProject,
   aggregateByTime,
@@ -782,14 +786,19 @@ program
           headers: { "content-type": "text/html; charset=utf-8" },
         });
       }
-      if (url.pathname === "/app.js") {
-        return new Response(panelJs, {
-          headers: { "content-type": "text/javascript; charset=utf-8" },
-        });
-      }
-      if (url.pathname === "/i18n.js") {
-        return new Response(panelI18nJs, {
-          headers: { "content-type": "text/javascript; charset=utf-8" },
+      const panelAsset = (
+        {
+          "/app.js": [panelJs, "text/javascript"],
+          "/i18n.js": [panelI18nJs, "text/javascript"],
+          "/vendor/marked.min.js": [vendorMarked, "text/javascript"],
+          "/vendor/dompurify.min.js": [vendorPurify, "text/javascript"],
+          "/vendor/highlight.min.js": [vendorHljs, "text/javascript"],
+          "/vendor/highlight-dark.css": [vendorHljsCss, "text/css"],
+        } as Record<string, [string, string]>
+      )[url.pathname];
+      if (panelAsset) {
+        return new Response(panelAsset[0], {
+          headers: { "content-type": `${panelAsset[1]}; charset=utf-8` },
         });
       }
       return new Response("not found", { status: 404 });

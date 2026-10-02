@@ -700,6 +700,31 @@ const longPre = (text) => {
     <details class="expand"><summary>${esc(t("expandAll"))}</summary><pre>${esc(s)}</pre></details>`;
 };
 
+/* Markdown for ASSISTANT messages only: marked → DOMPurify → hljs. User,
+   system and tool content stays escaped plain text — transcripts embed
+   XML-ish context (<environment_context>) that must never parse as HTML.
+   All three libs are vendored (no CDN) so the panel works fully offline;
+   without them we silently fall back to the old plain-text body. */
+const renderMd = (() => {
+  const ready =
+    typeof marked !== "undefined" && typeof DOMPurify !== "undefined" && marked.parse;
+  if (ready) marked.setOptions({ gfm: true, breaks: false });
+  return (src) => {
+    if (!ready) return `<div class="body">${esc(src)}</div>`;
+    const clean = DOMPurify.sanitize(marked.parse(src ?? ""), {
+      USE_PROFILES: { html: true },
+    });
+    const tpl = document.createElement("template");
+    tpl.innerHTML = clean;
+    if (typeof hljs !== "undefined") {
+      tpl.content.querySelectorAll("pre code").forEach((el) => {
+        try { hljs.highlightElement(el); } catch {}
+      });
+    }
+    return `<div class="body md">${tpl.innerHTML}</div>`;
+  };
+})();
+
 function renderMsg(m, toolNames) {
   const when = m.timestamp ? `<time>${fmtTime(m.timestamp)}</time>` : "";
   if (m.role === "system") {
@@ -720,7 +745,7 @@ function renderMsg(m, toolNames) {
   return `<div class="msg ${m.role === "user" ? "user" : "assistant"}">
     <div class="who">${m.role === "user" ? "USER" : `ASSISTANT${m.model ? ` · ${esc(m.model)}` : ""}`}${when}</div>
     ${thinking}
-    ${m.content ? `<div class="body">${esc(m.content)}</div>` : ""}
+    ${m.content ? (m.role === "user" ? `<div class="body">${esc(m.content)}</div>` : renderMd(m.content)) : ""}
   </div>`;
 }
 

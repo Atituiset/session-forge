@@ -391,7 +391,28 @@
   .spinner { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--cyan);
     border-radius: 50%; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg) } }
+
+  /* ── Markdown 渲染（仅 assistant 消息；highlight.js 配色在 vendor css）── */
+  .body.md { line-height: 1.65; }
+  .body.md > :first-child { margin-top: 0; }
+  .body.md > :last-child { margin-bottom: 0; }
+  .body.md p { margin: 8px 0; }
+  .body.md ul, .body.md ol { margin: 8px 0 8px 22px; }
+  .body.md li { margin: 3px 0; }
+  .body.md code { font-family: var(--mono); font-size: 12px; background: rgba(96,165,250,.14); padding: 1px 5px; border-radius: 4px; }
+  .body.md pre { background: var(--bg1); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 10px 0; }
+  .body.md pre code { background: none; padding: 0; font-size: 12px; line-height: 1.55; }
+  .body.md blockquote { border-left: 3px solid var(--cyan); margin: 10px 0; padding: 2px 12px; color: var(--dim); }
+  .body.md table { border-collapse: collapse; margin: 10px 0; }
+  .body.md th, .body.md td { border: 1px solid var(--line); padding: 4px 10px; font-size: 12px; }
+  .body.md h1, .body.md h2, .body.md h3, .body.md h4 { margin: 14px 0 8px; line-height: 1.3; }
+  .body.md h1 { font-size: 18px; } .body.md h2 { font-size: 16px; }
+  .body.md h3 { font-size: 14px; } .body.md h4 { font-size: 13px; }
+  .body.md a { color: var(--cyan); }
+  .body.md hr { border: none; border-top: 1px solid var(--line); margin: 12px 0; }
+  .body.md img { max-width: 100%; }
 </style>
+<link rel="stylesheet" href="vendor/highlight-dark.css" />
 </head>
 <body>
 
@@ -513,6 +534,9 @@
 
 <div class="toast" id="toast"><div class="spinner" id="toast-spin"></div><span id="toast-msg" data-i18n="toastScanning">扫描中…</span></div>
 
+<script src="vendor/marked.min.js"></script>
+<script src="vendor/dompurify.min.js"></script>
+<script src="vendor/highlight.min.js"></script>
 <script src="i18n.js"></script>
 <script src="app.js"></script>
 </body>

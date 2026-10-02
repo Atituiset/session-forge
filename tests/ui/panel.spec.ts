@@ -558,3 +558,83 @@ test.describe("i18n", () => {
     expect(errors).toEqual([]);
   });
 });
+
+test.describe("markdown rendering in session detail", () => {
+  test.beforeAll(ensureScanned);
+
+  test("assistant messages render markdown + hljs; user stays plain; XSS stripped", async ({
+    page,
+  }) => {
+    const md = [
+      "## Fix summary",
+      "",
+      "The **race** came from `beforeEach`:",
+      "",
+      "- streamed conversion",
+      "- capped preview",
+      "",
+      "```ts",
+      "const x: number = await load();",
+      "```",
+      "",
+      "> benchmark: 1.2s → 90ms",
+      "",
+      "<script>alert(1)</script><img src=x onerror=alert(2)>",
+    ].join("\n");
+    await page.route("**/api/session?**", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          source: "claude-code",
+          id: "md-stub",
+          projectPath: "/home/ci/proj-alpha",
+          startedAt: "2026-08-20T10:00:00Z",
+          endedAt: null,
+          model: "claude-opus-4.1",
+          tokensIn: 100,
+          tokensOut: 10,
+          rounds: 1,
+          rawMeta: {},
+          messages: [
+            {
+              role: "user",
+              content: "**keep this literal**",
+              timestamp: "2026-08-20T10:00:00Z",
+              toolName: null,
+              toolInput: null,
+              model: null,
+              thinking: null,
+            },
+            {
+              role: "assistant",
+              content: md,
+              timestamp: "2026-08-20T10:01:00Z",
+              toolName: null,
+              toolInput: null,
+              model: "claude-opus-4.1",
+              thinking: null,
+            },
+          ],
+        }),
+      }),
+    );
+    await page.goto(PANEL);
+    await enterAlphaProject(page);
+    const row = page.locator(".session-row").first();
+    await row.click();
+    const body = page.locator(".msg.assistant .body.md");
+    await expect(body.locator("h2")).toHaveText("Fix summary", { timeout: 10_000 });
+    await expect(body.locator("strong").first()).toHaveText("race");
+    await expect(body.locator("ul li")).toHaveCount(2);
+    await expect(body.locator("pre code.hljs")).toHaveCount(1);
+    await expect(body.locator("blockquote")).toContainText("benchmark");
+    // Injected markup is sanitized: scripts removed; img may remain as an
+    // inert broken image, but every event-handler attribute must be gone.
+    await expect(body.locator("script")).toHaveCount(0);
+    await expect(body.locator("[onerror], [onclick], [onload]")).toHaveCount(0);
+    // User messages never get markdown treatment.
+    const userBody = page.locator(".msg.user .body");
+    await expect(userBody).toContainText("**keep this literal**");
+    await expect(userBody.locator("strong")).toHaveCount(0);
+  });
+});

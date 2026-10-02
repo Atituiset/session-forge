@@ -1,0 +1,14 @@
+Vendored libraries (src-web/vendor/)
+
+SessionForge bundles the following third-party libraries, embedded into the
+compiled binary so the panel works fully offline:
+
+- marked (https://github.com/markedjs/marked) — MIT License
+  Copyright (c) 2011-2024, Christopher Jeffrey
+- DOMPurify (https://github.com/cure53/DOMPurify) — Apache-2.0 / MPL-2.0
+  Copyright 2026 Dr.-Ing. Mario Heiderich, Cure53
+- highlight.js (https://highlightjs.org) — BSD-3-Clause
+  Copyright (c) 2006-2026 Josh Goebel and contributors
+
+Each library's full license text ships in its source header and upstream
+repository. They are used unmodified.
