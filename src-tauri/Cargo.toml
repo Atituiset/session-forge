@@ -18,6 +18,12 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2"
+# Auto-update. The client refuses any bundle whose minisign signature does not
+# verify against the pubkey pinned in tauri.conf.json, so a tampered or
+# substituted asset cannot be installed. Signing happens in CI (see
+# .github/workflows/release.yml); the private key never enters the repo.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

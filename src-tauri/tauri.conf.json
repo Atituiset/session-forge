@@ -27,6 +27,19 @@
       "dangerousDisableAssetCspModification": true
     }
   },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "dialog": false,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU5Q0JCRENFRTkwQTM5MUQKUldRZE9RcnB6cjNMV1NoYjZscXJPMTd4NVlZN2FETTdQQ2hxcWd1cmJwWkJIRFhLcjRzdGJJZDUK",
+      "endpoints": [
+        "https://github.com/Atituiset/session-forge/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": [

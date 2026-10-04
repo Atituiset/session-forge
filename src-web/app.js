@@ -806,8 +806,14 @@ function renderMsg(m, toolNames) {
   if (m.role === "tool" || isBareToolCall) {
     // Tool results carry no toolName — pair back to the call via toolCallId.
     const name = m.toolName ?? (m.toolCallId && toolNames?.get(m.toolCallId)) ?? "tool";
+    // Keep the lane on tool rows too: a subagent's tool traffic is otherwise
+    // indistinguishable from the main agent's in a delegated session.
+    const toolLane =
+      m.agent || m.agentLabel
+        ? `<span class="lane">${esc(t("subagentLane", { name: m.agentLabel ?? m.agent }))}</span>`
+        : "";
     return `<div class="msg tool"><details>
-      <summary>${esc(t("toolPrefix"))} · ${esc(name)}${m.timestamp ? ` · ${fmtTime(m.timestamp)}` : ""}</summary>
+      <summary>${esc(t("toolPrefix"))} · ${esc(name)}${toolLane}${m.timestamp ? ` · ${fmtTime(m.timestamp)}` : ""}</summary>
       ${renderToolInput(name, m.toolInput)}
       ${m.content ? longPre(m.content) : ""}
     </details></div>`;
@@ -815,6 +821,16 @@ function renderMsg(m, toolNames) {
   const thinking = m.thinking
     ? `<details class="thinking"><summary>${esc(t("thinkingProcess"))}</summary><pre>${esc(m.thinking)}</pre></details>`
     : "";
+  // Subagent swimlane. NIR carries `agent` / `agentLabel` on every message a
+  // subagent produced (kimi names its lanes agent-0…agent-19, 14381 such
+  // messages in a real corpus) but the transcript view never showed it, so a
+  // delegated session read as if the main agent had done all of it. Rendered
+  // as a lane badge next to the role, and only when non-null: the main lane
+  // must not grow a redundant "main" chip.
+  const lane =
+    m.agent || m.agentLabel
+      ? `<span class="lane">${esc(t("subagentLane", { name: m.agentLabel ?? m.agent }))}</span>`
+      : "";
   // An assistant message that ALSO calls a tool keeps its prose bubble, with
   // the call input attached as a compact block.
   const toolCall =
@@ -825,7 +841,7 @@ function renderMsg(m, toolNames) {
         </details></div>`
       : "";
   return `<div class="msg ${m.role === "user" ? "user" : "assistant"}">
-    <div class="who">${m.role === "user" ? "USER" : `ASSISTANT${m.model ? ` · ${esc(m.model)}` : ""}`}${when}</div>
+    <div class="who">${m.role === "user" ? "USER" : `ASSISTANT${m.model ? ` · ${esc(m.model)}` : ""}`}${lane}${when}</div>
     ${thinking}
     ${m.content ? (m.role === "user" ? `<div class="body">${esc(m.content)}</div>` : renderMd(m.content)) : ""}
     ${toolCall}
@@ -993,6 +1009,96 @@ document.addEventListener("keydown", (e) => {
 
 $("btn-scan").onclick = runScan;
 $("btn-export").onclick = () => window.open(`${API}/api/data`, "_blank");
+
+/* ── 版本号 + 自动更新 ──
+   The panel is also served standalone in a browser against a remote engine,
+   where there is no app version and no updater — so the whole module is gated
+   on the Tauri bridge and the chip stays hidden otherwise. */
+const UPDATER = (() => {
+  const internals = window.__TAURI_INTERNALS__;
+  const invoke = internals?.invoke
+    ? (cmd, args) => internals.invoke(cmd, args)
+    : (cmd, args) => window.__TAURI__?.core?.invoke?.(cmd, args);
+  if (!invoke) return null;
+
+  let pending = null; // in-flight update, kept so the chip can install it
+  let appVersion = null;
+
+  async function currentVersion() {
+    try {
+      return await invoke("plugin:app|version");
+    } catch {
+      return null;
+    }
+  }
+
+  async function check({ silent } = {}) {
+    try {
+      pending = await invoke("plugin:updater|check");
+    } catch (err) {
+      // No published update, offline, or unsigned manifest — all routine. The
+      // chip keeps showing the current version and stays quiet.
+      if (!silent) console.warn("update check failed", err);
+      pending = null;
+      return null;
+    }
+    render();
+    return pending;
+  }
+
+  async function install() {
+    if (!pending) return;
+    let downloaded = 0;
+    let total = 0;
+    await pending.downloadAndInstall((event) => {
+      if (event.event === "Started") total = event.data.contentLength ?? 0;
+      else if (event.event === "Progress") downloaded += event.data.chunkLength;
+      render(downloaded, total);
+    });
+    // relaunch is a separate plugin call; without it the new bundle sits on
+    // disk until the user restarts by hand.
+    await invoke("plugin:process|restart");
+  }
+
+  function render(downloaded, total) {
+    const chip = $("verchip");
+    if (!chip || !appVersion) return;
+    chip.hidden = false;
+    if (!pending) {
+      // Up to date. The chip reverts to plain version display and a manual
+      // re-check on click — it must NOT hide here, or the version the user
+      // asked to see disappears whenever no update exists (the common case).
+      chip.classList.remove("update");
+      chip.disabled = false;
+      chip.textContent = `v${appVersion}`;
+      chip.onclick = () => check({ silent: false });
+      return;
+    }
+    chip.classList.add("update");
+    if (total > 0) {
+      chip.disabled = true;
+      chip.textContent = t("updateDownloading", {
+        pct: String(Math.round((downloaded / total) * 100)),
+      });
+      return;
+    }
+    chip.disabled = false;
+    chip.textContent = t("updateAvailable", { version: pending.version });
+    chip.onclick = () => {
+      if (confirm(t("updateConfirm", { version: pending.version }))) install();
+    };
+  }
+
+  async function init() {
+    appVersion = await currentVersion();
+    if (!appVersion) return;
+    render();
+    await check({ silent: true });
+  }
+
+  return { init, check, install };
+})();
+UPDATER?.init();
 
 if (hasTauriBridge) {
   const internals = window.__TAURI_INTERNALS__;

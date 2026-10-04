@@ -87,6 +87,17 @@
   .livepill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor;
     animation: pulse 2s infinite; box-shadow: 0 0 8px currentColor; }
   @keyframes pulse { 50% { opacity: .35 } }
+  /* Version chip. Hidden entirely outside the Tauri shell (the browser-served
+     panel has no updater and no app version to report). Turns amber when an
+     update is available, which is its only interactive state. */
+  .verchip { display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-family: var(--mono); color: var(--dim);
+    border: 1px solid rgba(160,160,200,.28); border-radius: 99px; padding: 4px 11px;
+    background: transparent; cursor: pointer; }
+  .verchip[hidden] { display: none; }
+  .verchip:hover { color: var(--text); border-color: rgba(160,160,200,.5); }
+  .verchip.update { color: var(--amber); border-color: rgba(251,191,36,.45);
+    background: rgba(251,191,36,.09); }
   .hero-actions { margin-left: auto; display: flex; gap: 10px; }
 
   /* ── 机器卡片条：一台机器一张卡，点击切换看板/会话范围 ── */
@@ -364,6 +375,15 @@
     text-transform: uppercase; color: var(--dim); display: flex; gap: 8px;
     align-items: center; margin-bottom: 6px; }
   .msg .who time { margin-left: auto; }
+  /* Subagent swimlane badge. Sits inline after the role, before the (auto-
+     margin) timestamp. text-transform:none is deliberate — the parent
+     uppercases, which would turn a lane id like "agent-3" into "AGENT-3"
+     and break the visual link to the ids used elsewhere. */
+  .lane { font-size: 10px; letter-spacing: 0; text-transform: none;
+    color: var(--violet); background: rgba(167,139,250,.12);
+    border: 1px solid rgba(167,139,250,.3); border-radius: 4px;
+    padding: 0 5px; }
+  details > summary .lane { margin: 0 2px; }
   .msg .body { white-space: pre-wrap; word-break: break-word; }
   .msg.user { background: rgba(34,211,238,.07); border-right: 3px solid var(--cyan); }
   .msg.assistant { background: rgba(167,139,250,.07); border-left: 3px solid var(--violet); }
@@ -454,6 +474,7 @@
       <span data-i18n="appTitle">认知资产面板</span>
     </h1>
     <span class="livepill" id="engine-pill"><i></i><span id="engine-pill-text" data-i18n="engineDetecting">检测引擎…</span></span>
+    <button class="verchip" id="verchip" type="button" hidden></button>
     <div class="engine-menu">
       <button class="engine-chip" id="engine-chip" type="button" data-i18n-title="engineChipTitle" title="选择数据来自哪个 SessionForge 引擎"><span data-i18n="engineChipPrefix">引擎</span> · <span id="engine-chip-label">本机默认</span> ▾</button>
       <details class="engine-pop" id="engine-pop">
