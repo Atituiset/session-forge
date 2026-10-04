@@ -4,7 +4,8 @@ export type ReaderFamily =
   | "codex-family"
   | "claude-code"
   | "opencode-sqlite"
-  | "antigravity-transcript";
+  | "antigravity-transcript"
+  | "hermes-sqlite";
 
 export interface ToolSpec {
   id: string;
@@ -76,6 +77,15 @@ export const TOOLS: ToolSpec[] = [
     paths: everyPlatform([
       "~/.gemini/antigravity-cli/brain/*/.system_generated/logs/transcript.jsonl",
     ]),
+  },
+  {
+    id: "hermes",
+    family: "hermes-sqlite",
+    paths: {
+      linux: ["~/.hermes/state.db"],
+      darwin: ["~/.hermes/state.db"],
+      win32: ["~/.hermes/state.db"],
+    },
   },
 ];
 
@@ -203,9 +213,45 @@ export async function heuristicCandidatesFor(
     }
     if (await probe.exists(`${base}/opencode.db`)) {
       out.push({ toolId, family: "opencode-sqlite", pattern: `${base}/opencode.db` });
+      continue;
+    }
+    // Generic SQLite agent stores. `state.db` with sessions+messages is the
+    // shape Hermes uses; it matched none of the three signatures above, so a
+    // real corpus lost 44 sessions / 14154 messages to a silently skipped
+    // directory. Probing by filename alone would misfire on unrelated state
+    // databases, so require the table shape too — a cheap schema check on a
+    // local file, and the only way to tell an agent store from a mail cache.
+    if (await probe.exists(`${base}/state.db`)) {
+      if (await looksLikeAgentStore(`${base}/state.db`)) {
+        out.push({ toolId, family: "hermes-sqlite", pattern: `${base}/state.db` });
+      }
     }
   }
   return out;
+}
+
+/**
+ * Does this SQLite file actually hold agent conversations? Reads
+ * sqlite_master only — no session rows — so it stays cheap on large stores.
+ * Requires both `sessions` and `messages`: that pair is what every
+ * conversation-shaped agent DB has, and what a config/state DB lacks.
+ */
+async function looksLikeAgentStore(file: string): Promise<boolean> {
+  const { Database } = await import("bun:sqlite");
+  let db: InstanceType<typeof Database> | null = null;
+  try {
+    db = new Database(file, { readonly: true });
+    const rows = db
+      .query(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('sessions','messages')",
+      )
+      .all() as { name: string }[];
+    return rows.length === 2;
+  } catch {
+    return false;
+  } finally {
+    db?.close();
+  }
 }
 function patternSuffixFor(family: ReaderFamily): string {
   switch (family) {
@@ -217,5 +263,7 @@ function patternSuffixFor(family: ReaderFamily): string {
       return "/opencode.db";
     case "antigravity-transcript":
       return "/brain/*/.system_generated/logs/transcript.jsonl";
+    case "hermes-sqlite":
+      return "/state.db";
   }
 }

@@ -31,6 +31,7 @@ const base = {
   thinking: null,
   agent: null,
   agentLabel: null,
+  toolTarget: null,
 };
 
 describe("enrich", () => {

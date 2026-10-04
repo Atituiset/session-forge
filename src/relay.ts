@@ -129,6 +129,7 @@ function projectSession(session: NirSession, targetId: string, opts: RelayOption
           thinking: null,
           agent: null,
           agentLabel: null,
+          toolTarget: null,
         },
       ],
     };

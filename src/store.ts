@@ -39,7 +39,18 @@ export class Store {
   // ("Exit code: N", "Process exited with code N"), which 0.5 wrongly recorded as
   // signal-free. Measured: codex outcome coverage 5.8% → 79.2% of tool calls,
   // 109 real errors that were previously invisible.
-  private static readonly INGEST_FORMAT_VERSION = 7;
+  // v8: agent-session-format 0.7 reads kimi `task.terminated` events, which
+  // carry status/exitCode/stopReason for every detached command. Adds failure
+  // classes the corpus had never contained: killed (83), timed_out (17), lost
+  // (12). 661 verdicts across 611 kimi sessions, previously 0.
+  // v9: agent-session-format 0.9 fixes two accounting defects. opencode no
+  // longer discards messages that have no text part, which was throwing away
+  // the tokens they spent (measured: 2221 token-bearing messages and 445 M
+  // cacheRead across 40 recent sessions); sessions without a session-level
+  // total fall back to summing messages, so they were undercounted ~2x.
+  // antigravity now recovers its workspace from tool_calls[].args.Cwd instead
+  // of hardcoding null, so its sessions stop collapsing into "(unknown)".
+  private static readonly INGEST_FORMAT_VERSION = 9;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;

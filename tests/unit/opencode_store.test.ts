@@ -172,6 +172,7 @@ describe("store", () => {
           thinking: null,
           agent: null,
           agentLabel: null,
+          toolTarget: null,
         },
       ],
       rawMeta: {},
@@ -192,9 +193,12 @@ describe("store", () => {
     expect(upgraded.upsert(session, "f", 1).status).toBe("updated");
     upgraded.close();
     const check = new Database(dbPath, { readonly: true });
+    // Tracks Store.INGEST_FORMAT_VERSION: bumped to 9 for agent-session-format
+    // 0.9 (opencode no longer drops token-bearing messages that have no text
+    // part; antigravity recovers its workspace instead of hardcoding null).
     expect(
       (check.prepare("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(7);
+    ).toBe(9);
     check.close();
     // Second open: format already current → no reset, rev dedup works again.
     const again = new Store(dbPath);
@@ -226,6 +230,7 @@ describe("store", () => {
           thinking: null,
           agent: null,
           agentLabel: null,
+          toolTarget: null,
         },
       ],
       rawMeta: {},
@@ -262,6 +267,7 @@ describe("store", () => {
           thinking: null,
           agent: null,
           agentLabel: null,
+          toolTarget: null,
         },
       ],
       rawMeta: {},
@@ -297,6 +303,7 @@ describe("store", () => {
           thinking: null,
           agent: null,
           agentLabel: null,
+          toolTarget: null,
         },
       ],
       rawMeta: {},
@@ -351,6 +358,7 @@ describe("store", () => {
           thinking: null,
           agent: null,
           agentLabel: null,
+          toolTarget: null,
         },
       ],
       rawMeta: localPath ? { localPath } : {},
@@ -400,6 +408,7 @@ describe("store", () => {
           thinking: null,
           agent: null,
           agentLabel: null,
+          toolTarget: null,
         },
       ],
       rawMeta: {},
@@ -443,6 +452,7 @@ describe("store", () => {
           thinking: null,
           agent: null,
           agentLabel: null,
+          toolTarget: null,
         },
       ],
       rawMeta: {},
@@ -480,6 +490,7 @@ describe("store", () => {
           thinking: null,
           agent: null,
           agentLabel: null,
+          toolTarget: null,
         },
       ],
       rawMeta: {},
@@ -545,6 +556,7 @@ describe("store", () => {
           thinking: null,
           agent: null,
           agentLabel: null,
+          toolTarget: null,
         },
       ],
       rawMeta: {},

@@ -14,6 +14,7 @@ function msg(partial: Partial<NirMessage> & { role: NirMessage["role"] }): NirMe
     thinking: null,
     agent: null,
     agentLabel: null,
+    toolTarget: null,
     ...partial,
   };
 }

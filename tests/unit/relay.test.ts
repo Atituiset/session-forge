@@ -42,6 +42,7 @@ function makeSession(overrides: Partial<NirSession> = {}): NirSession {
         thinking: null,
         agent: null,
         agentLabel: null,
+        toolTarget: null,
       },
       {
         role: "assistant",
@@ -54,6 +55,7 @@ function makeSession(overrides: Partial<NirSession> = {}): NirSession {
         thinking: "let me look at the test setup",
         agent: null,
         agentLabel: null,
+        toolTarget: null,
       },
     ],
     rawMeta: {},

@@ -2,6 +2,7 @@ import type { ReaderFamily } from "../registry.ts";
 import { AntigravityReader } from "./antigravity.ts";
 import { ClaudeCodeReader } from "./claude_code.ts";
 import { CodexFamilyReader } from "./codex_family.ts";
+import { HermesSqliteReader } from "./hermes_sqlite.ts";
 import { OpencodeSqliteReader } from "./opencode_sqlite.ts";
 import type { Reader } from "./util.ts";
 
@@ -10,6 +11,7 @@ const READERS: Record<ReaderFamily, Reader> = {
   "claude-code": new ClaudeCodeReader(),
   "opencode-sqlite": new OpencodeSqliteReader(),
   "antigravity-transcript": new AntigravityReader(),
+  "hermes-sqlite": new HermesSqliteReader(),
 };
 
 export function readerFor(family: ReaderFamily): Reader {
