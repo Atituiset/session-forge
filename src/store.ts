@@ -50,7 +50,13 @@ export class Store {
   // total fall back to summing messages, so they were undercounted ~2x.
   // antigravity now recovers its workspace from tool_calls[].args.Cwd instead
   // of hardcoding null, so its sessions stop collapsing into "(unknown)".
-  private static readonly INGEST_FORMAT_VERSION = 9;
+  // v10: the WSL/SSH scan agent had been stuck at 0.1.24 since Sep 5, so every
+  // cross-machine number in the index was produced by a parser that predates
+  // cache columns entirely — the desktop showed 4.90 B where the native WSL
+  // engine showed 8.73 B for the same sessions. ensureAgent now redeploys a
+  // stale agent, but rows already stored keep their old rev and would be
+  // skipped, so force one more full re-ingest to overwrite them.
+  private static readonly INGEST_FORMAT_VERSION = 10;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
