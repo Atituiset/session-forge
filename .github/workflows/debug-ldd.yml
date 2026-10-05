@@ -21,6 +21,17 @@ jobs:
         with:
           bun-version-file: ".bun-version"
       - run: bun install --frozen-lockfile
+      - name: fetch the exact sidecar binary the failing release bundled
+        # The release's Linux desktop job bundles the artifact built by the
+        # sidecar job on ubuntu-latest. ldd fails on THAT file on 22.04 but
+        # not on a freshly built one — probe the artifact itself here.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run download 37281971007 -n sidecars-ubuntu-latest -D /tmp/ci-sidecar
+          sha256sum /tmp/ci-sidecar/session-forge-engine-x86_64-unknown-linux-gnu
+          cp /tmp/ci-sidecar/session-forge-engine-x86_64-unknown-linux-gnu /tmp/ci-engine
+          chmod +x /tmp/ci-engine
       - name: build the same engine binary the release bundles
         run: bun build --compile --target=bun-linux-x64 src/cli.ts --outfile /tmp/engine
       - name: environment
@@ -39,13 +50,26 @@ jobs:
           /lib64/ld-linux-x86-64.so.2 --verify /tmp/engine; echo "exit=$?"
           echo "== ld.so --list =="
           /lib64/ld-linux-x86-64.so.2 --list /tmp/engine; echo "exit=$?"
+      - name: probe ldd on the CI-artifact binary (the one that fails in release)
+        run: |
+          file /tmp/ci-engine
+          echo "== plain ldd =="
+          ldd /tmp/ci-engine; echo "exit=$?"
+          echo "== LC_ALL=C ldd =="
+          LC_ALL=C ldd /tmp/ci-engine; echo "exit=$?"
+          echo "== ld.so --verify =="
+          /lib64/ld-linux-x86-64.so.2 --verify /tmp/ci-engine; echo "exit=$?"
+          echo "== ld.so --list =="
+          /lib64/ld-linux-x86-64.so.2 --list /tmp/ci-engine; echo "exit=$?"
+          echo "== readelf headers =="
+          readelf -d /tmp/ci-engine | head -20
       - name: replicate linuxdeploy on a minimal AppDir
         run: |
           curl -fsSL -o /tmp/linuxdeploy.AppImage \
             https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage
           chmod +x /tmp/linuxdeploy.AppImage
           rm -rf /tmp/AppDir && mkdir -p /tmp/AppDir/usr/bin
-          cp /tmp/engine /tmp/AppDir/usr/bin/session-forge-engine
+          cp /tmp/ci-engine /tmp/AppDir/usr/bin/session-forge-engine
           cd /tmp
           APPIMAGE_EXTRACT_AND_RUN=1 /tmp/linuxdeploy.AppImage --appimage-extract-and-run \
             --verbosity 0 --appdir /tmp/AppDir 2>&1 | tail -20
