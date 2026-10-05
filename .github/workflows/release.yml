@@ -75,7 +75,18 @@ jobs:
         # — it does not propagate through Tauri's spawn-linuxdeploy chain
         # (upstream tauri#15106). jammy still supports what the AppImage path
         # needs.
-        os: [ubuntu-22.04, macos-latest, windows-latest]
+        #
+        # sidecarOs is where the platform's engine binary is BUILT, which for
+        # Linux is still ubuntu-latest. Keying the artifact download on `os`
+        # made the job look for sidecars-ubuntu-22.04 — nothing publishes that
+        # — and it died in "place sidecars" before reaching the bundler.
+        include:
+          - os: ubuntu-22.04
+            sidecarOs: ubuntu-latest
+          - os: macos-latest
+            sidecarOs: macos-latest
+          - os: windows-latest
+            sidecarOs: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -84,8 +95,8 @@ jobs:
       - run: bun install --frozen-lockfile
       - uses: actions/download-artifact@v4
         with:
-          pattern: sidecars-${{ matrix.os }}
-          path: .
+          name: sidecars-${{ matrix.sidecarOs }}
+          path: sidecar-bundle
       - name: download linux scan agent (all platforms bundle it)
         uses: actions/download-artifact@v4
         with:
@@ -95,8 +106,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p src-tauri/binaries
-          cp sidecars-${{ matrix.os }}/* src-tauri/binaries/
-          cp sidecar-linux/session-forge-linux-x64-agent src-tauri/binaries/ || \
+          cp sidecar-bundle/* src-tauri/binaries/
+          # The linux scan agent is what scans WSL guests and ssh remotes, so
+          # every platform ships it regardless of its own engine target.
+          cp sidecar-linux/session-forge-linux-x64-agent src-tauri/binaries/ 2>/dev/null || \
             echo "::warning::linux agent missing — auto-deploy disabled"
           chmod +x src-tauri/binaries/* || true
       - uses: dtolnay/rust-toolchain@stable
