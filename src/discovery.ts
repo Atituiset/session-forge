@@ -106,7 +106,10 @@ async function scanGroup(
     // locks and multi-GB ssh snapshots crash the runtime. Both WSL guests
     // and ssh remotes instead run our agent binary on the source machine
     // (auto-deployed) and stream JSONL back — no cross-machine copying.
-    if (family === "opencode-sqlite" && group[0]) {
+    // Applies to every sqlite family: hermes-sqlite over UNC fails the same
+    // way opencode does, and before it was routed here its sessions simply
+    // never landed on the Windows engine.
+    if ((family === "opencode-sqlite" || family === "hermes-sqlite") && group[0]) {
       const channel = agentChannelForCandidate(transport, group[0]);
       if (channel) {
         return scanGroupViaAgent(transport, store, key, group, channel);
@@ -362,7 +365,10 @@ async function scanGroupViaAgent(
       ensured.bin,
       "scan-jsonl",
       "--tools",
-      "opencode",
+      // The agent filters on the bare spec id (buildCandidatesFor strips any
+      // "@machine" label), so pass ours stripped — hardcoding "opencode" here
+      // made every other agent-routed family (hermes-sqlite) scan nothing.
+      toolId.split("@")[0] ?? toolId,
       ...(maxRev > 0 ? ["--since", String(maxRev)] : []),
     ],
     async (line) => {
