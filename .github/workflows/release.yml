@@ -113,7 +113,13 @@ jobs:
           releaseBody: "AI 编码 Session 聚合与互操作平台。桌面版内置引擎，数据全部本地处理。"
           releaseDraft: false
           prerelease: false
-          args: ${{ runner.os == 'Linux' && '--bundles deb' || '' }}
+          # No `--bundles deb` override here. That override predates the
+          # updater and silently broke it: on Linux the updater signs the
+          # AppImage, so building only `deb` produced a release with no .sig
+          # and no latest.json ("Signature not found for the updater JSON").
+          # Build the platform default set and sign whatever updater
+          # recognises. CI time goes up by one Linux bundle; correctness
+          # wins.
       - name: windows smoke — install / run / overwrite / uninstall
         if: runner.os == 'Windows'
         shell: pwsh
