@@ -71,10 +71,13 @@ jobs:
         # linuxdeploy, which is itself an AppImage and needs FUSE; ubuntu-latest
         # (24.04 noble) runners cannot mount FUSE images under their CI
         # seccomp/namespace setup, and the failure is only ever reported as
-        # "failed to run linuxdeploy". APPIMAGE_EXTRACT_AND_RUN=1 does NOT help
-        # — it does not propagate through Tauri's spawn-linuxdeploy chain
-        # (upstream tauri#15106). jammy still supports what the AppImage path
-        # needs.
+        # "failed to run linuxdeploy". jammy still supports what the AppImage
+        # path needs.
+        #
+        # (Earlier revision of this comment claimed APPIMAGE_EXTRACT_AND_RUN
+        # does not propagate through Tauri's spawn chain, citing tauri#15106.
+        # That is outdated: tauri-bundler 2.9.x sets APPIMAGE_EXTRACT_AND_RUN=1
+        # and passes --appimage-extract-and-run to linuxdeploy itself.)
         #
         # sidecarOs is where the platform's engine binary is BUILT, which for
         # Linux is still ubuntu-latest. Keying the artifact download on `os`
@@ -125,6 +128,9 @@ jobs:
         # reporting only "failed to run linuxdeploy", which cost three release
         # attempts to diagnose blind. Run it here first so a failure names its
         # real cause instead of surfacing as that opaque message later.
+        # (A throwaway-AppDir bundle probe was tried and removed: it passes
+        # even where the real build fails, so it diagnoses nothing. The
+        # postmortem step below re-runs tauri's exact invocation instead.)
         if: runner.os == 'Linux'
         run: |
           curl -fsSL -o /tmp/linuxdeploy.AppImage \
@@ -158,6 +164,27 @@ jobs:
           # Build the platform default set and sign whatever updater
           # recognises. CI time goes up by one Linux bundle; correctness
           # wins.
+          # --verbose: without it tauri-bundler discards linuxdeploy's
+          # stdout/stderr entirely and reports only "failed to run
+          # linuxdeploy" (appimage/linuxdeploy.rs). In verbose mode the
+          # bundler logs every linuxdeploy stderr line, so the real error
+          # reaches the CI log. Keep this until the AppImage build is stable.
+          args: --verbose
+      - name: linuxdeploy postmortem — re-run with visible stderr
+        # Belt and braces for the --verbose flag above: the failed tauri build
+        # leaves the AppDir under bundle/appimage/ and the downloaded tools in
+        # ~/.cache/tauri, so repeat tauri's exact linuxdeploy invocation here
+        # where nothing can swallow its output.
+        if: failure() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          APPDIR=$(ls -d src-tauri/target/release/bundle/appimage/*.AppDir 2>/dev/null | head -1)
+          [ -n "$APPDIR" ] || { echo "no AppDir survived the failed build"; exit 0; }
+          export PATH="$HOME/.cache/tauri:$PATH"
+          OUTPUT=/tmp/postmortem.AppImage ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 \
+            "$HOME/.cache/tauri/linuxdeploy-x86_64.AppImage" \
+            --appimage-extract-and-run --verbosity 0 \
+            --appdir "$APPDIR" --plugin gtk --output appimage
       - name: windows smoke — install / run / overwrite / uninstall
         if: runner.os == 'Windows'
         shell: pwsh
