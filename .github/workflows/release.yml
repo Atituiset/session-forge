@@ -67,7 +67,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Linux pins 22.04 on purpose. Tauri's AppImage bundler is
+        # linuxdeploy, which is itself an AppImage and needs FUSE; ubuntu-latest
+        # (24.04 noble) runners cannot mount FUSE images under their CI
+        # seccomp/namespace setup, and the failure is only ever reported as
+        # "failed to run linuxdeploy". APPIMAGE_EXTRACT_AND_RUN=1 does NOT help
+        # — it does not propagate through Tauri's spawn-linuxdeploy chain
+        # (upstream tauri#15106). jammy still supports what the AppImage path
+        # needs.
+        os: [ubuntu-22.04, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -102,12 +110,6 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # linuxdeploy (which builds the AppImage the updater signs) is itself
-          # an AppImage and needs FUSE, which GitHub's ubuntu runners do not
-          # provide. Extraction mode sidesteps the mount entirely. Without this
-          # the Linux bundle dies with a bare "failed to run linuxdeploy" —
-          # tauri-action swallows the underlying dlopen error.
-          APPIMAGE_EXTRACT_AND_RUN: "1"
           # Signing material for the updater. Without these, tauri-action
           # still uploads installers but emits no .sig / latest.json, so the
           # client has nothing to verify against its pinned pubkey and every
