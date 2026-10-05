@@ -120,9 +120,25 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
             libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
             libfuse2 desktop-file-utils
+      - name: fetch linuxdeploy (preflight)
+        # linuxdeploy is itself an AppImage, and Tauri swallows its stderr —
+        # reporting only "failed to run linuxdeploy", which cost three release
+        # attempts to diagnose blind. Run it here first so a failure names its
+        # real cause instead of surfacing as that opaque message later.
+        if: runner.os == 'Linux'
+        run: |
+          curl -fsSL -o /tmp/linuxdeploy.AppImage \
+            https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage
+          chmod +x /tmp/linuxdeploy.AppImage
+          # shellcheck disable=SC2086
+          APPIMAGE_EXTRACT_AND_RUN=1 /tmp/linuxdeploy.AppImage --verbosity=0 --version \
+            || { echo "::error::linuxdeploy cannot execute on this runner"; exit 1; }
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Set for the bundling step too, not just the preflight: Tauri spawns
+          # linuxdeploy directly, so the variable has to be in its environment.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
           # Signing material for the updater. Without these, tauri-action
           # still uploads installers but emits no .sig / latest.json, so the
           # client has nothing to verify against its pinned pubkey and every
