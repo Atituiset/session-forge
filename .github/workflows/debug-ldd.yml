@@ -1,0 +1,52 @@
+name: debug-ldd
+
+# Throwaway diagnostic: why does `ldd` on the bun-compiled engine exit 1 on
+# the ubuntu-22.04 release runner (breaking linuxdeploy's gtk plugin), when
+# the exact binary traces fine with glibc 2.35's loader elsewhere?
+# Manual trigger only; delete once the AppImage failure is understood.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: ".bun-version"
+      - run: bun install --frozen-lockfile
+      - name: build the same engine binary the release bundles
+        run: bun build --compile --target=bun-linux-x64 src/cli.ts --outfile /tmp/engine
+      - name: environment
+        run: |
+          env | sort | grep -E "^(LD_|PATH|LC_|LANG)" || true
+          bash --version | head -1
+          ldd --version | head -1
+      - name: probe ldd on the engine binary
+        run: |
+          file /tmp/engine
+          echo "== plain ldd =="
+          ldd /tmp/engine; echo "exit=$?"
+          echo "== LC_ALL=C ldd (what linuxdeploy runs) =="
+          LC_ALL=C ldd /tmp/engine; echo "exit=$?"
+          echo "== ld.so --verify =="
+          /lib64/ld-linux-x86-64.so.2 --verify /tmp/engine; echo "exit=$?"
+          echo "== ld.so --list =="
+          /lib64/ld-linux-x86-64.so.2 --list /tmp/engine; echo "exit=$?"
+      - name: replicate linuxdeploy on a minimal AppDir
+        run: |
+          curl -fsSL -o /tmp/linuxdeploy.AppImage \
+            https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage
+          chmod +x /tmp/linuxdeploy.AppImage
+          rm -rf /tmp/AppDir && mkdir -p /tmp/AppDir/usr/bin
+          cp /tmp/engine /tmp/AppDir/usr/bin/session-forge-engine
+          cd /tmp
+          APPIMAGE_EXTRACT_AND_RUN=1 /tmp/linuxdeploy.AppImage --appimage-extract-and-run \
+            --verbosity 0 --appdir /tmp/AppDir 2>&1 | tail -20
+          echo "linuxdeploy exit=$?"
