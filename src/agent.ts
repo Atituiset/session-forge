@@ -1,6 +1,13 @@
 import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
 import path from "node:path";
+// Imported (not read from disk) so `bun build --compile` inlines the version
+// into the binary. A runtime read would fail inside a compiled single-file
+// executable, which is exactly where the staleness check below matters most.
+import pkg from "../package.json";
 import type { Transport } from "./transport/types.ts";
+
+/** Version of this engine/agent build — the yardstick for target staleness. */
+export const ENGINE_VERSION: string = typeof pkg.version === "string" ? pkg.version : "0.0.0";
 
 /**
  * Remote agent scanning: when the engine cannot (or must not) read a
@@ -123,6 +130,35 @@ export async function probeAgent(api: AgentChannelApi): Promise<string | null> {
   return r.exitCode === 0 && out.startsWith("/") ? (out.split("\n")[0] ?? null) : null;
 }
 
+/**
+ * Version the agent reports on the target, or null if it cannot answer.
+ *
+ * This exists because `probeAgent` alone is not a sufficient staleness test.
+ * A binary from any version satisfies "exists and is executable", so a
+ * months-old deployment looked healthy forever: this machine carried agent
+ * 0.1.24 since Sep 5 while the desktop app moved to 0.3.0, and because the
+ * agent does the actual parsing, its stale agent-session-format produced the
+ * numbers the desktop then displayed. The UI showed 4.90 B where the native
+ * WSL engine reported 8.73 B — same sessions, old parser.
+ */
+export async function probeAgentVersion(api: AgentChannelApi): Promise<string | null> {
+  const r = await api.exec([AGENT_BIN, "--version"]);
+  if (r.exitCode !== 0) return null;
+  const m = /(\d+\.\d+\.\d+)/.exec(r.stdout) ?? /(\d+\.\d+\.\d+)/.exec(r.stderr);
+  return m?.[1] ?? null;
+}
+
+/** Semver-ish compare: >0 when a is newer than b, <0 when older, 0 when equal. */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split(".").map((n) => Number.parseInt(n, 10) || 0);
+  const pb = b.split(".").map((n) => Number.parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
 /** Locate the shipped linux agent binary from the engine's own install. */
 export function findBundledLinuxAgent(): string | null {
   const here = path.dirname(process.execPath);
@@ -154,7 +190,21 @@ export async function ensureAgent(
   api: AgentChannelApi,
 ): Promise<{ ok: true; bin: string } | { ok: false; error: string }> {
   const probed = await probeAgent(api);
-  if (probed) return { ok: true, bin: probed };
+  // Existence is not enough: a months-old agent parses with whatever
+  // agent-session-format it was built against, and the desktop stores those
+  // numbers as fact. Redeploy whenever the target is behind us.
+  //
+  // An unreadable version is NOT treated as stale. A hand-built or truncated
+  // agent that works but cannot answer `--version` should keep being used;
+  // replacing it with our bundled binary could break a setup we do not
+  // understand, and a stale parse is a smaller harm than no scan at all.
+  if (probed) {
+    const target = await probeAgentVersion(api);
+    if (target === null || compareVersions(ENGINE_VERSION, target) <= 0) {
+      return { ok: true, bin: probed };
+    }
+    // Older on the target — fall through and redeploy.
+  }
   const bundled = findBundledLinuxAgent();
   if (!bundled) {
     return {

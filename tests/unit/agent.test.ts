@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { channelApi, ensureAgent, probeAgent, wslChannelFromUnc } from "../../src/agent.ts";
+import {
+  channelApi,
+  compareVersions,
+  ensureAgent,
+  probeAgent,
+  probeAgentVersion,
+  wslChannelFromUnc,
+} from "../../src/agent.ts";
 import type { Transport } from "../../src/transport/types.ts";
 
 /** Minimal fake transport: routes "commands" through an in-memory shell. */
@@ -72,6 +79,30 @@ describe("agent channel", () => {
     const r = await ensureAgent(api);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.length).toBeGreaterThan(5);
+  });
+
+  test("probeAgentVersion reads the target's reported version", async () => {
+    const t = fakeTransport((argv) => {
+      if (argv.includes("--version")) return { exitCode: 0, stdout: "0.3.0\n" };
+      return { exitCode: 1, stdout: "" };
+    });
+    const api = channelApi({ kind: "ssh", hostArg: "box" }, t);
+    expect(await probeAgentVersion(api)).toBe("0.3.0");
+  });
+
+  test("probeAgentVersion returns null when the target cannot answer", async () => {
+    const t = fakeTransport(() => ({ exitCode: 1, stdout: "" }));
+    const api = channelApi({ kind: "ssh", hostArg: "box" }, t);
+    expect(await probeAgentVersion(api)).toBeNull();
+  });
+
+  test("compareVersions orders numerically, not lexically", () => {
+    expect(compareVersions("0.3.0", "0.1.24")).toBe(1);
+    expect(compareVersions("0.1.24", "0.3.0")).toBe(-1);
+    expect(compareVersions("0.3.0", "0.3.0")).toBe(0);
+    // Lexical comparison would call "0.10.0" < "0.9.0".
+    expect(compareVersions("0.10.0", "0.9.0")).toBe(1);
+    expect(compareVersions("1.0", "1.0.0")).toBe(0);
   });
 
   test("ssh channel execs through the transport itself (no wsl.exe prefix)", async () => {
