@@ -37,6 +37,22 @@ failed to bundle project: `failed to run linuxdeploy`
 - Tauri 构建后要 patch `__TAURI_BUNDLE_TYPE` 标记,被 strip 掉后 updater 无法更新该包(upstream 明确警告)
 - linuxdeploy 会对 AppDir 里的 .so 跑 strip,可能报 `.relr.dyn` 不识别
 
+### 坑 4(AppImage 的真正根因,已实锤):patchelf/strip 会**摧毁** bun 编译的 sidecar
+
+前三次失败全是这一个问题,但错误被坑 1 吞掉所以一直在猜。完整链条:
+
+1. linuxdeploy 主阶段对 AppDir 里**每个 ELF** 跑 `patchelf --set-rpath`
+2. patchelf 重写 ELF section 布局,而 `bun build --compile` 的 JS payload 是按文件偏移引用的 overlay —— **改完布局后二进制直接报废:启动即段错误,`ldd` 静默退 1(无输出)**
+3. gtk 插件会**第二次**遍历 AppDir(嵌套 linuxdeploy 调用),对已被 patchelf 改坏的 engine 跑 ldd → 抛 `std::runtime_error` 中止
+4. tauri 只报 `failed to run linuxdeploy`
+
+**修复**(`scripts/linuxdeploy-patchelf.sh` + release.yml):linuxdeploy 认 `$PATCHELF` 环境变量(elf_file.cpp),指向一个选择性 wrapper —— bun sidecar(engine/agent,只链系统库,不需要 rpath)直接跳过,其余文件透传给真 patchelf;同时设 `NO_STRIP=1` 防 strip 同样破坏 overlay。**即使构建能过,不修这个 shipped AppImage 里的 engine 也是坏的** —— 这不是构建问题,是产物正确性问题。
+
+验证方法(以后排查类似问题可复用):
+- tauri-action 加 `args: --verbose` —— bundler 在 verbose 下会逐行打 linuxdeploy 的 stderr(非 verbose 直接丢弃,这就是坑 1 的机制,`tauri-bundler/src/utils/mod.rs`)
+- `if: failure()` 的 postmortem 步骤:失败的构建会留下 AppDir 和 `~/.cache/tauri` 工具,原样复现 tauri 的调用,输出全可见
+- 下载旧版 glibc 的 deb 解包,用它的 loader 跑 `--list`/`--verify`,可以在新系统上模拟老系统的 ldd
+
 ---
 
 ## 三、当前状态表
@@ -57,23 +73,12 @@ failed to bundle project: `failed to run linuxdeploy`
 
 ## 四、待办(按建议顺序)
 
-### A. 先诊断 Linux(别再猜)
+### A. 先诊断 Linux(别再猜)—— **已完成,根因见坑 4**
 
-用刚加的 preflight 步骤。核心判断树:
-
-```
-preflight 的 --version 通过?
-├─ 否 → runner 环境问题,换 ubuntu-24.04 试
-└─ 是 → 继续
-   preflight 的 bundle 测试(throwaway AppDir)通过?
-   ├─ 否 → linuxdeploy 在 CI 上真的跑不了,读它输出的错误
-   └─ 是 → tauri spawn 方式的问题,查 tauri 2.11.4 的 AppImage bundler 源码
-```
-
-参考线索:
-- tauri CLI 版本 **2.11.4**(`node_modules/@tauri-apps/cli`)
-- upstream CHANGELOG 提到 commit `8b465a12b`(PR #13913)"pulls the latest AppImage linuxdeploy plugin instead of using the built-in one. This should remove the libfuse requirement." —— 但日志显示 tauri 仍在下载 `linuxdeploy-x86_64.AppImage` 本体(需要 FUSE 的那个),只有 plugin 换了。**可能这个改动只覆盖了 plugin,没覆盖本体。**
-- 上游 issue:`tauri-apps/tauri#15106`(已关闭)
+~~用刚加的 preflight 步骤。~~ 最终生效的诊断组合:`args: --verbose` + postmortem 复现步骤(都留在 release.yml 里了)。根因不是 FUSE、不是 spawn、不是 glibc —— 是 patchelf 破坏 bun sidecar 后 gtk 插件的嵌套 linuxdeploy 对其跑 ldd 中止。参考线索的收尾:
+- commit `8b465a12b` 那条确实只换了 plugin,但与本故障无关
+- "APPIMAGE_EXTRACT_AND_RUN 不传播"的说法对 bundler 2.9.x 已过时(它自己设置并传 `--appimage-extract-and-run`)
+- 22.04 pin 保留(没必要动),但故障与它无关
 
 ### B. 如果 Linux 短期解不了
 
@@ -138,6 +143,20 @@ Windows / macOS 的 updater 照常工作 —— 但前提是 `latest.json` 能�
 
 **我手动做过的事**(可能需要清理):
 - 把 `~/.local/bin/session-forge` 换成了 0.3.0,旧的备份在 `/tmp/sf-agent-backup-0.1.24`(重启后会消失)
+
+### hermes 跨机不显示(kimi 接手后修的第二个 bug,`0680285`)
+
+**症状**:Windows 引擎(新版,18 tools)扫 WSL,antigravity 20 会话进去了,hermes 44 会话一条没有;WSL 原生扫描两边都有。
+
+**根因(两层,都在 `src/discovery.ts`)**:
+1. `scanGroup` 只把 `opencode-sqlite` 路由到 agent 扫描,`hermes-sqlite` 漏了 → Windows 引擎直接用普通 reader 经 UNC 开 `state.db`,SQLite 在 UNC 上拿不到锁,静默读空
+2. 就算路由过去也会被第二处坑掉:`scanGroupViaAgent` 的 `--tools` **硬编码 "opencode"**,hermes 候选传过去 agent 还是只扫 opencode
+
+**修法**:所有 sqlite family 都走 agent 通道;`--tools` 传候选自己的 base tool id。已验证 agent 侧 `scan-jsonl --tools hermes` 在 WSL 输出全部 44 会话。**跨机端到端(Windows 装 0.3.1 后重扫)仍待验证。**
+
+### antigravity "不显示" —— 不是 bug(实测结论)
+
+Windows 库里 20 个会话在 10-05 15:52 那轮扫描就已入库,17 个带 projectPath(asf 0.9.0 修复生效)。首页**项目网格是按 token 取前 12 的卡**,antigravity 总共才 ~0.8M token 排不进去;会话视图按来源筛 `gemini-antigravity` 能看到全部。如果要在网格露脸,得改网格的取数逻辑(设计决策,不是缺陷)。
 
 ### Windows 4177 端口冲突
 
