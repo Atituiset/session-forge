@@ -122,7 +122,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
             libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
-            libfuse2 desktop-file-utils
+            libfuse2 desktop-file-utils patchelf
       - name: fetch linuxdeploy (preflight)
         # linuxdeploy is itself an AppImage, and Tauri swallows its stderr —
         # reporting only "failed to run linuxdeploy", which cost three release
@@ -145,6 +145,19 @@ jobs:
           # Set for the bundling step too, not just the preflight: Tauri spawns
           # linuxdeploy directly, so the variable has to be in its environment.
           APPIMAGE_EXTRACT_AND_RUN: "1"
+          # patchelf destroys `bun build --compile` binaries (their JS payload
+          # is an offset-referenced overlay): after linuxdeploy's rpath pass
+          # they SEGFAULT on start and `ldd` fails silently, which aborted the
+          # gtk plugin's nested linuxdeploy run ("Failed to run ldd: exited
+          # with code 1") — surfaced by tauri only as "failed to run
+          # linuxdeploy". linuxdeploy honors $PATCHELF (elf_file.cpp): point
+          # it at the selective wrapper that skips the bun sidecars (they
+          # link only system libs and need no rpath) and passes everything
+          # else through to the real patchelf.
+          PATCHELF: ${{ github.workspace }}/scripts/linuxdeploy-patchelf.sh
+          # linuxdeploy would also strip the sidecars; strip drops the bun
+          # overlay the same way. Skip stripping for the whole bundle.
+          NO_STRIP: "1"
           # Signing material for the updater. Without these, tauri-action
           # still uploads installers but emits no .sig / latest.json, so the
           # client has nothing to verify against its pinned pubkey and every
@@ -181,6 +194,8 @@ jobs:
           APPDIR=$(ls -d src-tauri/target/release/bundle/appimage/*.AppDir 2>/dev/null | head -1)
           [ -n "$APPDIR" ] || { echo "no AppDir survived the failed build"; exit 0; }
           export PATH="$HOME/.cache/tauri:$PATH"
+          export PATCHELF="$GITHUB_WORKSPACE/scripts/linuxdeploy-patchelf.sh"
+          export NO_STRIP=1
           OUTPUT=/tmp/postmortem.AppImage ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 \
             "$HOME/.cache/tauri/linuxdeploy-x86_64.AppImage" \
             --appimage-extract-and-run --verbosity 0 \
