@@ -7,8 +7,9 @@
 
 ## 一、一句话现状
 
-**macOS 和 Windows 已成功发布,Linux 卡在 AppImage 上,updater 签名因此缺失。**
-另外有一个已修好但**未验证**的 agent 自动重部署机制(修 4.90B vs 8.73B 的 token 差异)。
+**v0.3.2 已完整发布:三平台产物 + 全部 .sig + latest.json 齐全。** Linux AppImage 根因(patchelf 破坏 bun sidecar,坑 4)和签名缺失根因(`createUpdaterArtifacts` 缺省 false)均已修复。剩余仅客户端侧实测:updater 端到端、agent 自动重部署跨机重扫、hermes 跨机。
+
+**版本说明**:0.3.0(无 Linux、未签名)→ 0.3.1(AppImage 修复,但漏了 createUpdaterArtifacts 仍未签名)→ 0.3.2(完整)。0.3.0/0.3.1 的 release 留在原地,latest 指向 0.3.2。
 
 ---
 
@@ -60,14 +61,18 @@ failed to bundle project: `failed to run linuxdeploy`
 | 项目 | 状态 |
 |---|---|
 | agent-session-format 0.9.0 | ✅ 已发 npm,110 测试通过 |
-| session-forge 代码 | ✅ 已推 origin/main(HEAD `d8a9688` + 未推的 preflight 改动) |
+| session-forge 代码 | ✅ 已推 origin/main(0.3.2,`4783a8c` + 文档更新) |
 | CI(非 release) | ✅ 全绿(4 jobs × 3 OS) |
 | 本地测试 | ✅ 133 通过 · lint 干净 · typecheck 干净 |
-| release macOS | ✅ dmg 产物正常 |
-| release Windows | ✅ exe + 冒烟测试通过 |
-| release Linux | ❌ AppImage 构建失败 |
-| `.sig` / `latest.json` | ❌ 缺失(Linux 无 AppImage 可签) |
-| Windows updater 实际可用性 | ⚠️ 未验证(签名缺失) |
+| release 0.3.2 macOS | ✅ dmg + app.tar.gz + .sig |
+| release 0.3.2 Windows | ✅ NSIS + MSI + .sig,冒烟测试通过 |
+| release 0.3.2 Linux | ✅ AppImage + deb + rpm + .sig(坑 4 修复) |
+| `latest.json` | ✅ 已生成(createUpdaterArtifacts: true,见下) |
+| updater 端到端 | ⚠️ 待实测(0.3.0 客户端 → 0.3.2) |
+| agent 自动重部署跨机重扫 | ⚠️ 待实测(Windows 装 0.3.2 后) |
+| hermes 跨机扫描 | ⚠️ 待实测(同上,修复见第六节) |
+
+**第六个坑(0.3.1 踩的)**:`bundle.createUpdaterArtifacts` 缺省是 `false`(tauri-utils `Default for Updater = Bool(false)`)。配置里没这个 key 时 `settings.updater()` 为 `None`,**签名被整体静默跳过,不报错**。updater 插件 active ≠ 会签。0.3.1 全绿但零签名就是这个原因。
 
 ---
 
