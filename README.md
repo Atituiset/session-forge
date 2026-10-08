@@ -63,7 +63,7 @@ session-forge scan                 discover & ingest sessions from all known age
 session-forge serve [--port N]     local API + embedded panel (default :4177)
 session-forge report               token/round/diff stats per project, tool, model
 session-forge relay <id> --to <cli>  project a session into another CLI's storage
-session-forge export               export the knowledge base as Markdown
+session-forge export               export the knowledge base as Markdown (--format obsidian for an Obsidian vault)
 session-forge blackholes           find runaway sessions (tech-debt candidates)
 ```
 

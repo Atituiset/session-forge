@@ -60,7 +60,7 @@ session-forge scan                 发现并 ingest 所有已知 Agent 的会话
 session-forge serve [--port N]     本地 API + 内嵌面板（默认 :4177）
 session-forge report               按项目/工具/模型统计 token、轮次、代码变更
 session-forge relay <id> --to <cli>  把会话投影到另一个 CLI 的原生存储
-session-forge export               导出 Markdown 知识库
+session-forge export               导出 Markdown 知识库(--format obsidian 导出 Obsidian vault)
 session-forge blackholes           找出失控的黑洞会话（技术债务候选）
 ```
 

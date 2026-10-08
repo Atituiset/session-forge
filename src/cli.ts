@@ -26,6 +26,7 @@ import type { IntentTag } from "./llm_enrich/intent.ts";
 import { llmClassify, ruleClassify } from "./llm_enrich/intent.ts";
 import { formatTokens, shortPath } from "./output/format.ts";
 import { renderKnowledgeBase } from "./output/markdown.ts";
+import { attachDigests, renderVault, writeVault } from "./output/obsidian.ts";
 import { bar, renderTable } from "./output/terminal.ts";
 import { readerFor } from "./readers/index.ts";
 import type { ReaderFamily } from "./registry.ts";
@@ -164,10 +165,10 @@ program
 
 program
   .command("export")
-  .description("Export analysis results as Markdown or JSON")
+  .description("Export analysis results as Markdown, JSON, or an Obsidian vault")
   .option("--db <path>", "cache database path", defaultStorePath())
-  .option("--format <fmt>", "markdown | json", "markdown")
-  .option("--out <path>", "output file path")
+  .option("--format <fmt>", "markdown | json | obsidian", "markdown")
+  .option("--out <path>", "output file path (markdown/json) or vault directory (obsidian)")
   .option("--granularity <unit>", "day | week | month", "day")
   .action(async (opts: { db: string; format: string; out?: string; granularity: string }) => {
     const granularity = opts.granularity as "day" | "week" | "month";
@@ -192,6 +193,18 @@ program
         }));
         await Bun.write(out, JSON.stringify(data, null, 2));
         console.log(`Exported ${rows.length} sessions to ${out}`);
+        return;
+      }
+      if (opts.format === "obsidian") {
+        const outDir = opts.out ?? "session-forge-vault";
+        // Title/goal live in the raw payload; resolve per session (inline or
+        // externalized file) so multi-MB raws never pile up in memory.
+        const files = renderVault(attachDigests(store, rows));
+        const result = await writeVault(outDir, files);
+        console.log(
+          `Obsidian vault written to ${result.dir}: ${result.written} files` +
+            (result.removed > 0 ? ` (${result.removed} stale removed)` : ""),
+        );
         return;
       }
       const out = opts.out ?? "AI_DEV_HISTORY.md";
