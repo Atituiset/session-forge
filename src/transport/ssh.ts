@@ -22,19 +22,23 @@ export class SshTransport implements Transport {
   }
 
   private baseArgs(extra: string[]): string[] {
-    const cmPath = `${homedir()}/.ssh/session-forge-cm-%r@%h-%p`;
-    return [
-      "ssh",
-      "-o",
-      "BatchMode=yes",
-      "-o",
-      "ConnectTimeout=8",
-      "-o",
-      "ControlMaster=auto",
-      "-o",
-      `ControlPath=${cmPath}`,
-      "-o",
-      "ControlPersist=10m",
+    const args = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8"];
+    // Connection multiplexing is posix-only in practice: Windows OpenSSH's
+    // emulated unix sockets break when ssh is spawned from a background host
+    // process ("getsockname failed: Not a socket" — every exec fails), so
+    // there each command opens its own connection instead.
+    if (process.platform !== "win32") {
+      const cmPath = `${homedir()}/.ssh/session-forge-cm-%r@%h-%p`;
+      args.push(
+        "-o",
+        "ControlMaster=auto",
+        "-o",
+        `ControlPath=${cmPath}`,
+        "-o",
+        "ControlPersist=10m",
+      );
+    }
+    args.push(
       this.hostArg,
       "--",
       // ssh space-joins the remote command and the far shell re-parses it, so
@@ -42,7 +46,8 @@ export class SshTransport implements Transport {
       // split into `sh -c a && b` (a silent no-op sh plus top-level &&), and
       // find's "(" / ")" would be shell syntax errors.
       ...extra.map(shellQuote),
-    ];
+    );
+    return args;
   }
 
   async exec(argv: string[]): Promise<ExecResult> {
@@ -118,7 +123,21 @@ export class SshTransport implements Transport {
   async host(): Promise<HostInfo> {
     if (this.cachedHost) return this.cachedHost;
     const kernel = await this.exec(["uname", "-s"]);
+    // exec() never throws — a dead connection (unresolvable alias, refused
+    // key, broken mux) returns exit 255 with the reason on stderr. Fail LOUD
+    // here: otherwise the scan "succeeds" over zero files and the UI shows a
+    // green "ok" for a machine it never reached.
+    if (kernel.exitCode !== 0) {
+      throw new Error(
+        `ssh 无法连接 ${this.hostArg}: ${kernel.stderr.trim().slice(0, 200) || `exit ${kernel.exitCode}`}`,
+      );
+    }
     const home = await this.exec(["printenv", "HOME"]);
+    if (home.exitCode !== 0) {
+      throw new Error(
+        `ssh 无法读取 ${this.hostArg} 的 HOME: ${home.stderr.trim().slice(0, 200) || `exit ${home.exitCode}`}`,
+      );
+    }
     const kernelName = kernel.stdout.trim();
     let platform: PlatformId = "linux";
     if (kernelName === "Darwin") platform = "darwin";
