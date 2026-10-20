@@ -1,6 +1,6 @@
 [package]
 name = "session-forge"
-version = "0.3.3"
+version = "0.3.4"
 description = "Aggregate AI coding agent sessions into knowledge assets"
 edition = "2021"
 
