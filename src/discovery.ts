@@ -1,4 +1,9 @@
-import { type AgentChannel, channelApi, ensureAgent, wslChannelFromUnc } from "./agent.ts";
+import {
+  type AgentChannel,
+  channelApi,
+  ensureAgentForChannel,
+  wslChannelFromUnc,
+} from "./agent.ts";
 import { adapterForSource, resolveProjectRoot } from "./paths.ts";
 import { readerFor } from "./readers/index.ts";
 import type { Candidate, ReaderFamily } from "./registry.ts";
@@ -320,8 +325,14 @@ async function scanGroupViaAgent(
   channel: AgentChannel,
 ): Promise<ToolScanSummary> {
   const [toolId, family] = key.split("|") as [string, ReaderFamily];
+  // ssh candidates carry no "@<machine>" suffix (only WSL ones do), so derive
+  // the machine-qualified source the same way scanGroup does — otherwise the
+  // remote's sessions, rev watermark and prune all collide with the LOCAL
+  // machine's bare source ("opencode" on the laptop vs on the remote).
+  const sourceKey =
+    transport.kind === "local" ? toolId : `${toolId}@${transport.label.replace(/^[^:]+:/, "")}`;
   const summary: ToolScanSummary = {
-    toolId,
+    toolId: sourceKey,
     family,
     transport: channel.kind === "wsl" ? "wsl-agent" : "ssh-agent",
     files: group.length,
@@ -338,16 +349,16 @@ async function scanGroupViaAgent(
 
   // Probe; auto-deploy the bundled linux agent when missing.
   const api = channelApi(channel, transport);
-  const ensured = await ensureAgent(api);
+  const ensured = await ensureAgentForChannel(channel, transport);
   if (!ensured.ok) {
     summary.issues.push(ensured.error);
     return summary;
   }
 
   // Stream the agent's JSONL output line by line — never buffered whole.
-  const maxRev = store.maxRevFor(toolId);
+  const maxRev = store.maxRevFor(sourceKey);
   const seenIds = new Set<string>();
-  const adapter = adapterForSource(toolId, (await transport.host()).platform);
+  const adapter = adapterForSource(sourceKey, (await transport.host()).platform);
   const BATCH = 50;
   let batch: { session: NirSessionLike; rev: number }[] = [];
   const flush = () => {
@@ -385,11 +396,11 @@ async function scanGroupViaAgent(
       summary.sessions++;
       seenIds.add(parsed.session.id);
       // The agent runs on the source machine and stamps sessions with its
-      // local source ("opencode"); rebrand to the overlay toolId so rows land
-      // under opencode@wsl-<distro> / opencode@<remote> (machine card, rev
-      // watermark and prune all key on it).
-      if (parsed.session.source !== toolId) {
-        parsed.session = { ...parsed.session, source: toolId };
+      // local source ("opencode"); rebrand to the overlay sourceKey so rows
+      // land under opencode@wsl-<distro> / opencode@<remote> (machine card,
+      // rev watermark and prune all key on it).
+      if (parsed.session.source !== sourceKey) {
+        parsed.session = { ...parsed.session, source: sourceKey };
       }
       // Same root/localPath plumbing as the normal scan path. SSH remotes
       // stay native-only (no local twin); WSL guests get the UNC twin.
@@ -412,14 +423,17 @@ async function scanGroupViaAgent(
     },
   );
   flush();
+  const errTail = stream.stderr.trim();
   if (stream.exitCode !== 0 && summary.sessions === 0) {
-    summary.issues.push(`agent: ${stream.stderr.slice(0, 200) || `exit ${stream.exitCode}`}`);
+    summary.issues.push(`agent: ${errTail.slice(0, 200) || `exit ${stream.exitCode}`}`);
     return summary;
   }
-  // Prune ONLY on full scans: an incremental pass (--since watermark) sees a
-  // subset, and pruning to it would wipe every unchanged session.
-  if (maxRev === 0) {
-    const pruned = store.pruneOtherSessions(toolId, seenIds);
+  if (errTail) summary.issues.push(`agent: ${errTail.slice(0, 200)}`);
+  // Prune ONLY on full clean scans: an incremental pass (--since watermark)
+  // sees a subset, and a reader that errored (stderr) may have seen nothing —
+  // pruning to either would wipe sessions that still exist on the source.
+  if (maxRev === 0 && !errTail) {
+    const pruned = store.pruneOtherSessions(sourceKey, seenIds);
     if (pruned > 0) summary.issues.push(`pruned ${pruned} stale sessions`);
   }
   return summary;

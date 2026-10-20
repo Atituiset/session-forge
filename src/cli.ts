@@ -65,7 +65,7 @@ program
         String(t.files),
         String(t.sessions),
         `+${t.inserted} ~${t.updated} =${t.skipped}`,
-        t.issues.length > 0 ? (t.issues[0] ?? "").slice(0, 40) : "",
+        t.issues.length > 0 ? (t.issues[0] ?? "").slice(0, 200) : "",
       ]);
       console.log(
         renderTable(
@@ -434,7 +434,12 @@ program
       const reader = readerFor(family);
       try {
         for await (const ev of reader.scan(transport, { toolId, files })) {
-          if (ev.kind !== "session") continue;
+          // Issues (schema mismatch, unreadable db) go to stderr so the
+          // engine can surface them; stdout stays clean session JSONL.
+          if (ev.kind === "issue") {
+            console.error(`[scan-jsonl] ${toolId}: ${ev.path}: ${ev.error}`.slice(0, 300));
+            continue;
+          }
           if (ev.rev <= since) continue;
           process.stdout.write(`${JSON.stringify({ rev: ev.rev, session: ev.session })}\n`);
         }

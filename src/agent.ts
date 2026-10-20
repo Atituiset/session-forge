@@ -141,8 +141,11 @@ export async function probeAgent(api: AgentChannelApi): Promise<string | null> {
  * numbers the desktop then displayed. The UI showed 4.90 B where the native
  * WSL engine reported 8.73 B — same sessions, old parser.
  */
-export async function probeAgentVersion(api: AgentChannelApi): Promise<string | null> {
-  const r = await api.exec([AGENT_BIN, "--version"]);
+export async function probeAgentVersion(
+  api: AgentChannelApi,
+  bin: string = AGENT_BIN,
+): Promise<string | null> {
+  const r = await api.exec([bin, "--version"]);
   if (r.exitCode !== 0) return null;
   const m = /(\d+\.\d+\.\d+)/.exec(r.stdout) ?? /(\d+\.\d+\.\d+)/.exec(r.stderr);
   return m?.[1] ?? null;
@@ -199,7 +202,9 @@ export async function ensureAgent(
   // replacing it with our bundled binary could break a setup we do not
   // understand, and a stale parse is a smaller harm than no scan at all.
   if (probed) {
-    const target = await probeAgentVersion(api);
+    // probeAgent's echo output is already shell-expanded ($HOME resolved);
+    // AGENT_BIN itself is not — quoted ssh argv does not expand it.
+    const target = await probeAgentVersion(api, probed);
     if (target === null || compareVersions(ENGINE_VERSION, target) <= 0) {
       return { ok: true, bin: probed };
     }
@@ -221,4 +226,31 @@ export async function ensureAgent(
   const again = await probeAgent(api);
   if (!again) return { ok: false, error: "agent: 部署后探测仍失败" };
   return { ok: true, bin: again };
+}
+
+type EnsureAgentResult = { ok: true; bin: string } | { ok: false; error: string };
+
+// Concurrent scan groups (opencode-sqlite, hermes-sqlite) on the same machine
+// would each deploy on their own: the scp uploads share one temp path and the
+// loser's mv fails. Deduplicate to one in-flight ensure per channel per
+// transport; the entry drops on settle so the next scan re-probes fresh.
+const ensureInflight = new WeakMap<Transport, Map<string, Promise<EnsureAgentResult>>>();
+
+export function ensureAgentForChannel(
+  channel: AgentChannel,
+  transport: Transport,
+): Promise<EnsureAgentResult> {
+  const key = channel.kind === "ssh" ? `ssh:${channel.hostArg}` : `wsl:${channel.distro}`;
+  let byTransport = ensureInflight.get(transport);
+  if (!byTransport) {
+    byTransport = new Map();
+    ensureInflight.set(transport, byTransport);
+  }
+  const existing = byTransport.get(key);
+  if (existing) return existing;
+  const p = ensureAgent(channelApi(channel, transport)).finally(() => {
+    byTransport.delete(key);
+  });
+  byTransport.set(key, p);
+  return p;
 }

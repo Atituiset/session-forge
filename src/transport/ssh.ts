@@ -37,7 +37,11 @@ export class SshTransport implements Transport {
       "ControlPersist=10m",
       this.hostArg,
       "--",
-      ...extra,
+      // ssh space-joins the remote command and the far shell re-parses it, so
+      // every argument must arrive quoted: `sh -c "a && b"` would otherwise
+      // split into `sh -c a && b` (a silent no-op sh plus top-level &&), and
+      // find's "(" / ")" would be shell syntax errors.
+      ...extra.map(shellQuote),
     ];
   }
 
@@ -236,6 +240,10 @@ export class SshTransport implements Transport {
 // merged multi-pattern find can be attributed back to the right pattern group.
 function wholenameMatches(spec: { base: string; wholename: string }, candidate: string): boolean {
   return findWholenameToRegex(spec.wholename).test(candidate);
+}
+
+function shellQuote(s: string): string {
+  return `'${s.replaceAll("'", `'\\''`)}'`;
 }
 
 export function findWholenameToRegex(wholename: string): RegExp {
